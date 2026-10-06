@@ -2,10 +2,20 @@ import {
   ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, EmbedBuilder, MessageFlags,
   PermissionFlagsBits as P, PermissionFlagsBits, SlashCommandBuilder, StringSelectMenuBuilder, StringSelectMenuOptionBuilder,
 } from 'discord.js';
+import { findAsset } from './assets.js';
 
 const EPHEMERAL = MessageFlags.Ephemeral;
 
+/**
+ * Kategorie ticketow. Kazda trafia do WLASNEJ kategorii (folderu) Discorda:
+ *   zakup -> TICKET_CATEGORY_ZAKUP, pomoc -> TICKET_CATEGORY_POMOC, wspolpraca -> TICKET_CATEGORY_WSPOLPRACA
+ * (jesli danej zmiennej brak, uzywany jest TICKET_CATEGORY_ID).
+ */
 const CATS = {
+  zakup: {
+    label: 'Zakup', desc: 'Chcę kupić licencję / moda', emoji: '🛒', color: 0x57f287,
+    intro: 'Napisz, co chcesz kupić – administracja prześle Ci szczegóły płatności i przygotuje licencję.',
+  },
   pomoc: {
     label: 'Pomoc', desc: 'Uzyskaj pomoc od administracji', emoji: '❓', color: 0xed4245,
     intro: 'Opisz dokładnie swój problem – administracja odpowie tak szybko, jak to możliwe.',
@@ -14,47 +24,71 @@ const CATS = {
     label: 'Współpraca', desc: 'Zgłoszenie w sprawie współpracy', emoji: '🤝', color: 0xf5c542,
     intro: 'Napisz, na czym ma polegać współpraca i kim jesteś – administracja się z Tobą skontaktuje.',
   },
-  media: {
-    label: 'Media', desc: 'Chcę zostać media', emoji: '📸', color: 0x5865f2,
-    intro: 'Podaj link do swojego kanału oraz liczbę widzów/subskrybentów – administracja rozpatrzy zgłoszenie.',
-  },
 };
 
-/** System zgloszen (ticketow) z lista wyboru kategorii. Wlasciciela ticketu trzymamy w temacie kanalu: ticket:<userId>:<kat>. */
+/**
+ * System zgloszen (ticketow) z lista wyboru kategorii.
+ * Temat kanalu trzyma stan:
+ *   ticket:<userId>:<kat>    - otwarty ticket
+ *   archiwum:<userId>:<kat>  - zamkniety (gracz usuniety z kanalu, kanal w kategorii "Usuniete", czeka na skasowanie)
+ */
 export function createTickets({ client, env, isAdmin, serverName }) {
   const staffRole = env.TICKET_STAFF_ROLE_ID;
   const adminIds = (env.ADMIN_IDS || '').split(',').map(s => s.trim()).filter(Boolean);
+  const deletedCategory = env.TICKET_CATEGORY_DELETED;
+  const parentFor = key => env[`TICKET_CATEGORY_${key.toUpperCase()}`] || env.TICKET_CATEGORY_ID || undefined;
 
   const ticketCmd = new SlashCommandBuilder()
     .setName('zgloszenia').setDescription('Wysyła na kanał panel systemu zgłoszeń (ticketów)')
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild);
 
+  function selectRow() {
+    const select = new StringSelectMenuBuilder()
+      .setCustomId('ticket:select').setPlaceholder('Wybierz kategorię ticketu...')
+      .addOptions(Object.entries(CATS).map(([value, c]) =>
+        new StringSelectMenuOptionBuilder().setLabel(c.label).setDescription(c.desc).setValue(value).setEmoji({ name: c.emoji })));
+    return new ActionRowBuilder().addComponents(select);
+  }
+
   function panelMessage({ noBanner = false } = {}) {
     const embed = new EmbedBuilder()
       .setColor(0x2b2d31)
-      .setTitle('System zgłoszeń')
-      .setDescription('> Wybierz kategorię **zgłoszenia** z poniższego paska wyboru.');
-    const banner = env.TICKET_BANNER_URL || env.BANNER_URL;
-    if (banner && !noBanner && /^https?:\/\//i.test(banner.trim())) embed.setImage(banner.trim());
-    const select = new StringSelectMenuBuilder()
-      .setCustomId('ticket:select').setPlaceholder('Wybierz kategorię zgłoszenia')
-      .addOptions(Object.entries(CATS).map(([value, c]) =>
-        new StringSelectMenuOptionBuilder().setLabel(c.label).setDescription(c.desc).setValue(value).setEmoji({ name: c.emoji })));
-    return { embeds: [embed], components: [new ActionRowBuilder().addComponents(select)] };
+      .setTitle(`📩 Centrum Pomocy • ${serverName}`)
+      .setDescription('Wybierz odpowiednią kategorię z rozwijanego menu poniżej, aby otworzyć prywatne zgłoszenie z personelem serwera.');
+    const payload = { embeds: [embed], components: [selectRow()] };
+    if (!noBanner) {
+      // grafika kota z folderu assets/ jest wysylana jako zalacznik - nie wygasa jak link z Discorda
+      const img = findAsset('ticket', 'kot');
+      if (img) {
+        embed.setImage(`attachment://${img.name}`);
+        payload.files = [img];
+      } else {
+        const url = (env.TICKET_BANNER_URL || env.BANNER_URL || '').trim();
+        if (/^https?:\/\//i.test(url)) embed.setImage(url);
+      }
+    }
+    return payload;
   }
 
   const ownerOf = ch => {
     const m = /^ticket:(\d+):/.exec(ch?.topic || '');
     return m ? m[1] : null;
   };
+  const isArchived = ch => /^archiwum:\d+:/.test(ch?.topic || '');
+  const isStaffMember = i => (!!staffRole && i.member?.roles?.cache?.has(staffRole)) || isAdmin(i);
 
   async function handleSelect(i) {
     const key = i.values[0];
     const cat = CATS[key];
-    if (!cat) return;
+    // lista wyboru zostaje "zaznaczona" - odswiezamy ja, zeby mozna bylo wybrac ponownie (embed i grafika zostaja)
+    const resetPanel = () => i.message.edit({ components: [selectRow()] }).catch(() => {});
+
+    if (!cat) {
+      resetPanel();
+      return i.reply({ content: '❌ Ta kategoria nie jest już dostępna. Poproś administrację o nowy panel (`/zgloszenia`).', flags: EPHEMERAL });
+    }
     await i.deferReply({ flags: EPHEMERAL });
-    // lista wyboru zostaje "zaznaczona" - odswiezamy panel, zeby mozna bylo wybrac ponownie
-    i.message.edit(panelMessage()).catch(() => {});
+    resetPanel();
 
     const guild = i.guild;
     const existing = guild.channels.cache.find(c => ownerOf(c) === i.user.id);
@@ -64,7 +98,7 @@ export function createTickets({ client, env, isAdmin, serverName }) {
     const overwrites = [
       { id: guild.id, deny: [P.ViewChannel] },
       { id: i.user.id, allow: [P.ViewChannel, P.SendMessages, P.ReadMessageHistory, P.AttachFiles, P.EmbedLinks] },
-      { id: client.user.id, allow: [P.ViewChannel, P.SendMessages, P.ReadMessageHistory, P.EmbedLinks, P.ManageChannels] },
+      { id: client.user.id, allow: [P.ViewChannel, P.SendMessages, P.ReadMessageHistory, P.EmbedLinks, P.ManageChannels, P.ManageRoles] },
     ];
     if (staffRole) overwrites.push({ id: staffRole, allow: [P.ViewChannel, P.SendMessages, P.ReadMessageHistory, P.AttachFiles, P.EmbedLinks] });
     for (const id of adminIds) overwrites.push({ id, allow: [P.ViewChannel, P.SendMessages, P.ReadMessageHistory, P.AttachFiles, P.EmbedLinks] });
@@ -73,13 +107,13 @@ export function createTickets({ client, env, isAdmin, serverName }) {
     try {
       ch = await guild.channels.create({
         name: `${key}-${nick}`, type: ChannelType.GuildText,
-        parent: env.TICKET_CATEGORY_ID || undefined,
+        parent: parentFor(key),
         topic: `ticket:${i.user.id}:${key}`,
         permissionOverwrites: overwrites,
       });
     } catch (e) {
       console.error('Nie udalo sie utworzyc ticketu:', e.message);
-      return i.editReply('❌ Nie udało się utworzyć zgłoszenia (sprawdź `TICKET_CATEGORY_ID` i uprawnienie bota „Zarządzanie kanałami”).');
+      return i.editReply(`❌ Nie udało się utworzyć zgłoszenia (sprawdź ID kategorii \`TICKET_CATEGORY_${key.toUpperCase()}\` i uprawnienie bota „Zarządzanie kanałami”).`);
     }
 
     const embed = new EmbedBuilder()
@@ -99,15 +133,61 @@ export function createTickets({ client, env, isAdmin, serverName }) {
     return i.editReply(`✅ Utworzono zgłoszenie: <#${ch.id}>`);
   }
 
+  /** "Usuniecie" ticketu przez gracza: gracz traci dostep, kanal wedruje do kategorii "Usuniete", reszta (administracja) zostaje. */
   async function handleClose(i) {
-    const owner = ownerOf(i.channel);
-    if (!owner) return i.reply({ content: '❌ To nie jest kanał zgłoszenia.', flags: EPHEMERAL });
-    const isStaff = !!staffRole && i.member?.roles?.cache?.has(staffRole);
-    if (!(i.user.id === owner || isStaff || isAdmin(i))) {
+    const ch = i.channel;
+    const owner = ownerOf(ch);
+    if (!owner) {
+      return i.reply({
+        content: isArchived(ch) ? '🔒 To zgłoszenie jest już zamknięte.' : '❌ To nie jest kanał zgłoszenia.',
+        flags: EPHEMERAL,
+      });
+    }
+    if (!(i.user.id === owner || isStaffMember(i))) {
       return i.reply({ content: '❌ Nie masz uprawnień do zamknięcia tego zgłoszenia.', flags: EPHEMERAL });
     }
-    await i.reply('🔒 Zgłoszenie zostanie zamknięte za 5 sekund...');
-    setTimeout(() => i.channel.delete('Zgłoszenie zamknięte').catch(e => console.error('Usuwanie ticketu:', e.message)), 5000);
+    await i.deferUpdate();
+
+    const key = /^ticket:\d+:(\w+)/.exec(ch.topic)[1];
+    try {
+      await ch.permissionOverwrites.delete(owner, 'Zgłoszenie zamknięte – gracz usunięty z kanału');
+      await ch.edit({
+        topic: `archiwum:${owner}:${key}`,
+        ...(deletedCategory ? { parent: deletedCategory, lockPermissions: false } : {}),
+      });
+    } catch (e) {
+      console.error('Zamykanie ticketu:', e.message);
+      return i.followUp({
+        content: `❌ Nie udało się zamknąć zgłoszenia: ${e.message}\n(Bot potrzebuje uprawnień „Zarządzanie kanałami” i „Zarządzanie rolami”; sprawdź też ID \`TICKET_CATEGORY_DELETED\` – kategoria może być pełna, limit 50 kanałów.)`,
+        flags: EPHEMERAL,
+      });
+    }
+    if (!deletedCategory) console.warn('Brak TICKET_CATEGORY_DELETED - kanal zostal w starej kategorii (gracz i tak zostal usuniety).');
+
+    await i.editReply({ components: [] }).catch(() => {});   // zdejmujemy przycisk z pierwszej wiadomosci
+    const embed = new EmbedBuilder()
+      .setColor(0xed4245)
+      .setTitle('🔒 Zgłoszenie zamknięte')
+      .setDescription([
+        `Zgłoszenie zostało zamknięte przez <@${i.user.id}>.`,
+        `Gracz <@${owner}> został usunięty z kanału.`,
+        '',
+        'Administracja może teraz usunąć kanał całkowicie przyciskiem poniżej.',
+      ].join('\n'))
+      .setFooter({ text: serverName });
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('ticket:delete').setLabel('Zamknij i usuń kanał').setEmoji('🗑️').setStyle(ButtonStyle.Danger),
+    );
+    await ch.send({ embeds: [embed], components: [row], allowedMentions: { parse: [] } })
+      .catch(e => console.error('Wiadomosc w archiwum ticketu:', e.message));
+  }
+
+  /** Przycisk w kategorii "Usuniete": kasuje kanal calkowicie (tylko administracja). */
+  async function handleDelete(i) {
+    if (!isArchived(i.channel)) return i.reply({ content: '❌ Ten kanał nie jest zamkniętym zgłoszeniem.', flags: EPHEMERAL });
+    if (!isStaffMember(i)) return i.reply({ content: '❌ Tylko administracja może usunąć ten kanał.', flags: EPHEMERAL });
+    await i.reply('🗑️ Kanał zostanie usunięty za 5 sekund...');
+    setTimeout(() => i.channel.delete('Zgłoszenie usunięte przez administrację').catch(e => console.error('Usuwanie ticketu:', e.message)), 5000);
   }
 
   return {
@@ -118,7 +198,7 @@ export function createTickets({ client, env, isAdmin, serverName }) {
       try { return await i.reply(panelMessage()); }
       catch (e) {
         console.error('Panel zgloszen (1. proba):', e);
-        // 2. proba: bez baneru (np. zly link w BANNER_URL)
+        // 2. proba: bez grafiki (np. brak uprawnienia "Dolaczanie plikow")
         try { return await i.reply(panelMessage({ noBanner: true })); }
         catch (e2) {
           console.error('Panel zgloszen (2. proba):', e2);
@@ -127,6 +207,10 @@ export function createTickets({ client, env, isAdmin, serverName }) {
       }
     },
     handleSelect,
-    handleButton: i => (i.customId === 'ticket:close' ? handleClose(i) : null),
+    handleButton: i => {
+      if (i.customId === 'ticket:close') return handleClose(i);
+      if (i.customId === 'ticket:delete') return handleDelete(i);
+      return null;
+    },
   };
 }

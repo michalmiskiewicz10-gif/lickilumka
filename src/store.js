@@ -8,7 +8,7 @@ import path from 'node:path';
 export class Store {
   constructor(file) {
     this.file = file;
-    this.data = { licenses: {}, suggestions: {}, users: {}, meta: {} };
+    this.data = { licenses: {}, suggestions: {}, users: {}, meta: {}, giveaways: {}, media: { apps: {}, cd: {} } };
     fs.mkdirSync(path.dirname(file), { recursive: true });
     if (fs.existsSync(file)) {
       this.data = JSON.parse(fs.readFileSync(file, 'utf8'));
@@ -16,6 +16,10 @@ export class Store {
       if (!this.data.suggestions) this.data.suggestions = {};
       if (!this.data.users) this.data.users = {};
       if (!this.data.meta) this.data.meta = {};
+      if (!this.data.giveaways) this.data.giveaways = {};
+      if (!this.data.media) this.data.media = {};
+      if (!this.data.media.apps) this.data.media.apps = {};
+      if (!this.data.media.cd) this.data.media.cd = {};
     }
   }
 
@@ -35,6 +39,17 @@ export class Store {
   // proste wartosci (licznik legitcheckow itp.)
   getMeta(k, def = null) { return k in this.data.meta ? this.data.meta[k] : def; }
   setMeta(k, v) { this.data.meta[k] = v; this.save(); return v; }
+
+  // konkursy (klucz = id wiadomosci konkursu)
+  getGiveaway(id) { return this.data.giveaways[id] || null; }
+  putGiveaway(gw) { this.data.giveaways[gw.id] = gw; this.save(); return gw; }
+  allGiveaways() { return Object.values(this.data.giveaways); }
+
+  // podania na range Media (klucz = id wiadomosci na kanale administracji) + cooldowny po odrzuceniu
+  putMedia(app) { this.data.media.apps[app.id] = app; this.save(); return app; }
+  pendingMedia(userId) { return Object.values(this.data.media.apps).find(a => a.userId === userId && a.status === 'pending') || null; }
+  getMediaCd(userId) { return this.data.media.cd[userId] || 0; }
+  setMediaCd(userId, until) { this.data.media.cd[userId] = until; this.save(); }
 
   put(lic) {
     this.data.licenses[lic.key] = lic;

@@ -1,6 +1,7 @@
 import {
   ActionRowBuilder, ButtonBuilder, ButtonStyle, Client, EmbedBuilder, Events, GatewayIntentBits,
-  MessageFlags, ModalBuilder, PermissionFlagsBits, SlashCommandBuilder, TextInputBuilder, TextInputStyle,
+  MessageFlags, ModalBuilder, Partials, PermissionFlagsBits, SlashCommandBuilder, StringSelectMenuBuilder,
+  StringSelectMenuOptionBuilder, TextInputBuilder, TextInputStyle,
 } from 'discord.js';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -9,6 +10,10 @@ import { genKey, parseDuration, parseText, isExpired, expiryText } from './util.
 import { createVerify } from './verify.js';
 import { createTickets } from './tickets.js';
 import { createLegit } from './legit.js';
+import { createMedia } from './media.js';
+import { createGiveaway } from './giveaway.js';
+import { MODS, DEFAULT_MOD } from './mods.js';
+import { findAsset } from './assets.js';
 
 const EPHEMERAL = MessageFlags.Ephemeral;
 
@@ -29,7 +34,9 @@ export function createBot({ store, env }) {
   if (env.PROPOSALS_CHANNEL_ID || env.LEGITCHECK_CHANNEL_ID) intents.push(GatewayIntentBits.GuildMessages);
   // tresc wiadomosci (uprzywilejowane) jest potrzebna tylko do propozycji
   if (env.PROPOSALS_CHANNEL_ID) intents.push(GatewayIntentBits.MessageContent);
-  const client = new Client({ intents });
+  // wiadomosci prywatne (podania na Media) - tresc PV nie wymaga uprzywilejowanego intentu
+  intents.push(GatewayIntentBits.DirectMessages);
+  const client = new Client({ intents, partials: [Partials.Channel] });
   const adminIds = (env.ADMIN_IDS || '').split(',').map(s => s.trim()).filter(Boolean);
 
   /** Uprawnienia: lista ADMIN_IDS albo "Zarzadzanie serwerem". */
@@ -41,6 +48,8 @@ export function createBot({ store, env }) {
   const verify = createVerify({ client, env, isAdmin, serverName });
   const tickets = createTickets({ client, env, isAdmin, serverName });
   const legit = createLegit({ store, env, isAdmin, serverName });
+  const media = createMedia({ client, store, env, isAdmin, serverName });
+  const giveaway = createGiveaway({ client, store, isAdmin });
 
   // ================= wiadomosc o licencji =================
   function statusOf(lic) {
@@ -54,7 +63,7 @@ export function createBot({ store, env }) {
     const st = statusOf(lic);
     const creator = lic.createdById ? `<@${lic.createdById}>` : (lic.createdByTag || '?');
     const embed = new EmbedBuilder()
-      .setTitle('🔑 Licencja AutoRynek')
+      .setTitle(`🔑 Licencja ${(MODS[lic.mod || DEFAULT_MOD] || MODS[DEFAULT_MOD]).label}`)
       .setColor(st.color)
       .addFields(
         { name: 'Kupujący', value: `<@${lic.discordId}>`, inline: true },
@@ -191,11 +200,17 @@ export function createBot({ store, env }) {
     const embed = new EmbedBuilder()
       .setColor(0xf5c542)
       .setTitle(`🔑 PANEL LICENCJI ${serverName.toUpperCase()}`)
-      .setDescription('Kliknij przycisk poniżej, aby sprawdzić swoją licencję (kod widzisz tylko Ty).');
-    const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('panel:lic').setLabel('Sprawdź swoją licencję').setEmoji('🔑').setStyle(ButtonStyle.Secondary),
+      .setDescription('Wybierz moda z listy poniżej, aby sprawdzić swoją licencję (kod widzisz tylko Ty).');
+    return { embeds: [embed], components: [modSelectRow()] };
+  }
+
+  /** Lista wyboru modow (suwak) - nowe mody dopisujesz w src/mods.js. */
+  function modSelectRow() {
+    return new ActionRowBuilder().addComponents(
+      new StringSelectMenuBuilder().setCustomId('panel:modsel').setPlaceholder('Wybierz moda...')
+        .addOptions(Object.entries(MODS).map(([value, m]) =>
+          new StringSelectMenuOptionBuilder().setLabel(m.label).setDescription(m.desc).setValue(value).setEmoji({ name: m.emoji }))),
     );
-    return { embeds: [embed], components: [row] };
   }
 
   /** Osobny panel (na nowym kanale) z przyciskiem "Jak zainstalowac moda". */
@@ -216,7 +231,7 @@ export function createBot({ store, env }) {
       const st = statusOf(lic);
       return new EmbedBuilder()
         .setColor(st.color)
-        .setTitle(`🔑 Twoja licencja AutoRynek (${serverName})`)
+        .setTitle(`🔑 Twoja licencja ${(MODS[lic.mod || DEFAULT_MOD] || MODS[DEFAULT_MOD]).label} (${serverName})`)
         .addFields(
           { name: 'Kod licencyjny', value: `\`\`\`${lic.key}\`\`\`` },
           { name: 'Status', value: st.text },
@@ -228,10 +243,12 @@ export function createBot({ store, env }) {
     return { embeds: embeds.slice(0, 10) };
   }
 
-  async function handleMyLicense(i) {
-    const mine = store.byDiscord(i.user.id).filter(l => !l.revoked);
+  async function handleMyLicense(i, modId = DEFAULT_MOD) {
+    const mod = MODS[modId];
+    if (!mod) return i.reply({ content: '❌ Nieznany mod.', flags: EPHEMERAL });
+    const mine = store.byDiscord(i.user.id).filter(l => !l.revoked && (l.mod || DEFAULT_MOD) === modId);
     if (!mine.length) {
-      return i.reply({ content: '❌ Nie masz żadnej aktywnej licencji. Jeśli ją kupiłeś, napisz do administracji.', flags: EPHEMERAL });
+      return i.reply({ content: `❌ Nie masz żadnej aktywnej licencji na moda **${mod.label}**. Jeśli ją kupiłeś, napisz do administracji.`, flags: EPHEMERAL });
     }
     const payload = ownerMessage(mine);
     try {
@@ -309,6 +326,7 @@ export function createBot({ store, env }) {
 
   client.on(Events.MessageCreate, async message => {
     legit.onMessage(message);
+    media.onMessage(message).catch(e => console.error('Media (PV):', e));
     if (!env.PROPOSALS_CHANNEL_ID || message.channelId !== env.PROPOSALS_CHANNEL_ID) return;
     if (message.author.bot || message.system) return;
     try { await convertToSuggestion(message); } catch (e) { console.error(e); }
@@ -328,7 +346,9 @@ export function createBot({ store, env }) {
       { name: 'Permanentna (bez końca)', value: 'perm' },
     ))
     .addIntegerOption(o => o.setName('ilosc').setDescription('Ile sekund/minut/godzin/dni (pomiń przy permanentnej)')
-      .setMinValue(1).setMaxValue(3650 * 86400));
+      .setMinValue(1).setMaxValue(3650 * 86400))
+    .addStringOption(o => o.setName('mod').setDescription('Którego moda dotyczy licencja (domyślnie AutoRynek)')
+      .addChoices(...Object.entries(MODS).map(([value, m]) => ({ name: m.label, value }))));
 
   const panelCmd = new SlashCommandBuilder()
     .setName('panel').setDescription('Wysyła na kanał panel licencji (przyciski dla graczy)')
@@ -344,6 +364,7 @@ export function createBot({ store, env }) {
     const user = i.options.getUser('discord', true);
     const unit = i.options.getString('jednostka', true);
     const amount = i.options.getInteger('ilosc');
+    const modId = i.options.getString('mod') || DEFAULT_MOD;
 
     const dur = parseDuration(unit, amount);
     if (!dur) {
@@ -361,7 +382,7 @@ export function createBot({ store, env }) {
     do { key = genKey(); } while (store.has(key));
     const now = Date.now();
     const lic = {
-      key, discordId: user.id,
+      key, discordId: user.id, mod: modId,
       createdAt: now,
       expiresAt: dur.perm ? null : now + dur.ms,
       hwid: null, activatedAt: null, lastSeen: null,
@@ -409,12 +430,16 @@ export function createBot({ store, env }) {
     const [action, arg] = i.customId.split(':');
 
     if (action === 'panel') {
-      if (arg === 'lic') return handleMyLicense(i);
+      if (arg === 'lic') {   // stary panel z przyciskiem - pokazujemy liste wyboru modow
+        return i.reply({ content: 'Wybierz moda, którego licencję chcesz sprawdzić:', components: [modSelectRow()], flags: EPHEMERAL });
+      }
       const mine = store.byDiscord(i.user.id).filter(l => !l.revoked);
       return i.reply({ ...helpMessage(mine), flags: EPHEMERAL });
     }
     if (action === 'verify') return verify.handleButton(i);
     if (action === 'ticket') return tickets.handleButton(i);
+    if (action === 'media') return media.handleButton(i);
+    if (action === 'gw') return giveaway.handleButton(i);
     if (action === 'vote') return handleVote(i, arg);
 
     // ponizej: tylko administracja
@@ -474,6 +499,8 @@ export function createBot({ store, env }) {
         if (i.commandName === 'weryfikacja') await verify.handleCommand(i);
         else if (i.commandName === 'zgloszenia') await tickets.handleCommand(i);
         else if (i.commandName === 'licznik') await legit.handleCommand(i);
+        else if (i.commandName === 'media') await media.handleCommand(i);
+        else if (i.commandName === 'konkurs' || i.commandName === 'roll') await giveaway.handleCommand(i);
         else if (i.commandName === 'licencja') await handleCreate(i);
         else if (i.commandName === 'panel') {
           if (!isAdmin(i)) return i.reply({ content: '❌ Nie masz uprawnień.', flags: EPHEMERAL });
@@ -483,9 +510,16 @@ export function createBot({ store, env }) {
           await i.reply(installPanelMessage());
         }
       } else if (i.isButton()) await handleButton(i);
-      else if (i.isStringSelectMenu()) { if (i.customId === 'ticket:select') await tickets.handleSelect(i); }
+      else if (i.isStringSelectMenu()) {
+        if (i.customId === 'ticket:select') await tickets.handleSelect(i);
+        else if (i.customId === 'panel:modsel') {
+          await handleMyLicense(i, i.values[0]);
+          i.message.edit({ components: [modSelectRow()] }).catch(() => {});   // zerujemy zaznaczenie na panelu
+        }
+      }
       else if (i.isModalSubmit()) {
         if (i.customId === 'verify:modal') await verify.handleModal(i);
+        else if (i.customId.startsWith('mediarej:')) await media.handleModal(i);
         else await handleModal(i);
       }
     } catch (e) {
@@ -498,15 +532,8 @@ export function createBot({ store, env }) {
   });
 
   // ================= powitania =================
-  /** Obrazek powitania: plik assets/welcome.(gif|png|jpg|jpeg|webp) ma pierwszenstwo przed WELCOME_IMAGE_URL (linki z Discorda wygasaja). */
-  function welcomeImage() {
-    const dir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'assets');
-    for (const ext of ['gif', 'png', 'jpg', 'jpeg', 'webp']) {
-      const f = path.join(dir, `welcome.${ext}`);
-      if (fs.existsSync(f)) return { attachment: f, name: `welcome.${ext}` };
-    }
-    return null;
-  }
+  /** Obrazek powitania: assets/welcome.* albo (domyslnie) grafika kota assets/kot.* - wysylane jako zalacznik, wiec nie wygasa. */
+  const welcomeImage = () => findAsset('welcome', 'kot');
 
   client.on(Events.GuildMemberAdd, async member => {
     if (!env.WELCOME_CHANNEL_ID) return;
@@ -535,7 +562,8 @@ export function createBot({ store, env }) {
 
   client.once(Events.ClientReady, async c => {
     console.log(`Bot zalogowany jako ${c.user.tag}`);
-    const cmds = [licencjaCmd, panelCmd, instalacjaCmd, ...verify.commands, ...tickets.commands, ...legit.commands].map(x => x.toJSON());
+    giveaway.start();
+    const cmds = [licencjaCmd, panelCmd, instalacjaCmd, ...verify.commands, ...tickets.commands, ...legit.commands, ...media.commands, ...giveaway.commands].map(x => x.toJSON());
     try {
       if (env.GUILD_ID) {
         const guild = await c.guilds.fetch(env.GUILD_ID);
