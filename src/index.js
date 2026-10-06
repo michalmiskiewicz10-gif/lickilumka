@@ -17,11 +17,23 @@ const privateKey = crypto.createPrivateKey({
 });
 
 const dir = path.dirname(fileURLToPath(import.meta.url));
-const store = new Store(path.join(dir, '..', 'data', 'licenses.json'));
+const dataDir = env.DATA_DIR || path.join(dir, '..', 'data');   // na Railway: ustaw DATA_DIR na sciezke Volume
+const store = new Store(path.join(dataDir, 'licenses.json'));
 
 const bot = createBot({ store, env });
-const api = createApi({ store, privateKey, onActivated: lic => bot.refreshMessage(lic) });
+const api = createApi({
+  store, privateKey,
+  onActivated: lic => bot.refreshMessage(lic),
+  oauthCallback: q => bot.oauthCallback(q),
+});
 
 const port = parseInt(env.PORT || '8787', 10);
 api.listen(port, () => console.log(`API licencji nasluchuje na porcie ${port}`));
-bot.client.login(env.DISCORD_TOKEN);
+bot.client.on('error', e => console.error('Blad klienta Discord:', e.message));
+bot.client.login(env.DISCORD_TOKEN).catch(e => {
+  console.error('Logowanie bota nie powiodlo sie:', e.message);
+  if (/intents/i.test(e.message)) {
+    console.error('=> Wlacz w Developer Portal -> Bot -> Privileged Gateway Intents: "Server Members Intent" i "Message Content Intent", zapisz i zrestartuj.');
+  }
+  process.exit(1);
+});
