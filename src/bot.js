@@ -6,8 +6,22 @@ import { genKey, parseDuration, parseText, isExpired, expiryText } from './util.
 
 const EPHEMERAL = MessageFlags.Ephemeral;
 
+/** 1 osoba / 2 osoby / 5 osob */
+function osob(n) {
+  if (n === 1) return '1 osoba';
+  const last = n % 10, lastTwo = n % 100;
+  if (last >= 2 && last <= 4 && !(lastTwo >= 12 && lastTwo <= 14)) return `${n} osoby`;
+  return `${n} osób`;
+}
+
 export function createBot({ store, env }) {
-  const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+  const serverName = env.SERVER_NAME || 'LumaMC';
+  const intents = [GatewayIntentBits.Guilds];
+  // GuildMembers to uprzywilejowane uprawnienie - wlaczamy je tylko gdy powitania sa skonfigurowane
+  if (env.WELCOME_CHANNEL_ID) intents.push(GatewayIntentBits.GuildMembers);
+  // propozycje z zwyklych wiadomosci: bot musi widziec tresc wiadomosci (uprzywilejowane - wlacz w Developer Portal)
+  if (env.PROPOSALS_CHANNEL_ID) intents.push(GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent);
+  const client = new Client({ intents });
   const adminIds = (env.ADMIN_IDS || '').split(',').map(s => s.trim()).filter(Boolean);
 
   /** Uprawnienia: lista ADMIN_IDS albo "Zarzadzanie serwerem". */
@@ -16,26 +30,27 @@ export function createBot({ store, env }) {
     return i.memberPermissions?.has(PermissionFlagsBits.ManageGuild) ?? false;
   }
 
-  // ---------- wyglad wiadomosci z licencja ----------
-  function buildMessage(lic) {
-    const expired = isExpired(lic);
-    let status, color;
-    if (lic.revoked) { status = '🔴 Unieważniona'; color = 0xed4245; }
-    else if (expired) { status = '🟠 Wygasła'; color = 0xf0a020; }
-    else if (lic.hwid) { status = '🟢 Aktywowana (przypisana do komputera)'; color = 0x57f287; }
-    else { status = '🟡 Jeszcze nie użyta'; color = 0x5865f2; }
+  // ================= wiadomosc dla administracji (kanal licencji) =================
+  function statusOf(lic) {
+    if (lic.revoked) return { text: '🔴 Unieważniona', color: 0xed4245 };
+    if (isExpired(lic)) return { text: '🟠 Wygasła', color: 0xf0a020 };
+    if (lic.hwid) return { text: '🟢 Aktywowana (przypisana do komputera)', color: 0x57f287 };
+    return { text: '🟡 Jeszcze nie użyta', color: 0x5865f2 };
+  }
 
+  function buildMessage(lic) {
+    const st = statusOf(lic);
+    const creator = lic.createdById ? `<@${lic.createdById}>` : (lic.createdByTag || '?');
     const embed = new EmbedBuilder()
       .setTitle('🔑 Licencja AutoRynek')
-      .setColor(color)
+      .setColor(st.color)
       .addFields(
         { name: 'Kupujący', value: `<@${lic.discordId}>`, inline: true },
-        { name: 'Status', value: status, inline: false },
-        { name: 'Kod licencyjny', value: `\`\`\`${lic.key}\`\`\`` },
-        { name: 'Jak użyć', value: 'W grze: `/autorynek licencja KOD` albo wklej kod w oknie licencji. Kod działa tylko na jednym komputerze.' },
+        { name: 'Utworzył', value: creator, inline: true },
+        { name: 'Status', value: st.text },
+        { name: 'Kod (ukryty)', value: `\`${lic.key.slice(0, 4)}-••••-••••-${lic.key.slice(-4)}\`` },
         { name: 'Wygasa', value: expiryText(lic) },
       )
-      .setFooter({ text: `Utworzył: ${lic.createdByTag}` })
       .setTimestamp(lic.createdAt);
 
     const dead = !!lic.revoked;
@@ -60,8 +75,186 @@ export function createBot({ store, env }) {
     }
   }
 
-  // ---------- komenda /licencja ----------
-  const command = new SlashCommandBuilder()
+  // ================= instrukcja =================
+  function helpMessage() {
+    const link = env.MOD_DOWNLOAD_URL ? `[kliknij tutaj](${env.MOD_DOWNLOAD_URL})` : 'link dostaniesz od administracji';
+    const install = new EmbedBuilder()
+      .setColor(0x5865f2)
+      .setTitle(`📖 Jak zainstalować moda AutoRynek (${serverName})`)
+      .setDescription([
+        'Mod działa na **Minecraft 1.21.11** z **Fabric**. Zrób to raz, krok po kroku:',
+        '',
+        '**Krok 1 – Zainstaluj Fabric**',
+        '• Wejdź na https://fabricmc.net/use/installer/ i pobierz instalator (dla Windows: plik `.exe`).',
+        '• Uruchom go, jako wersję Minecrafta wybierz **1.21.11** i kliknij **Install**.',
+        '• Otwórz Minecraft Launcher, wybierz profil **fabric-loader-1.21.11** i raz uruchom grę. Potem ją zamknij (powstanie folder `mods`).',
+        '',
+        '**Krok 2 – Pobierz Fabric API**',
+        '• Wejdź na https://modrinth.com/mod/fabric-api/versions, wybierz wersję **1.21.11** (Fabric) i kliknij **Download**.',
+        '',
+        `**Krok 3 – Pobierz moda AutoRynek**`,
+        `• Plik \`autorynek-….jar\` pobierzesz stąd: ${link}.`,
+        '• Pobierz tylko plik **bez** końcówki `-sources` i `-dev`.',
+        '',
+        '**Krok 4 – Wrzuć pliki do folderu mods**',
+        '• Wciśnij `Windows + R`, wpisz `%appdata%\\.minecraft\\mods` i naciśnij Enter.',
+        '• Skopiuj tam **dwa** pliki: `fabric-api-….jar` i `autorynek-….jar`.',
+        '',
+        '**Krok 5 – Uruchom grę**',
+        '• W Minecraft Launcherze wybierz profil **fabric-loader-1.21.11** i kliknij **Graj**.',
+        '• Gdy gra się włączy, mod wyświetli okno **„AutoRynek – licencja”** – przejdź do aktywacji.',
+      ].join('\n'));
+
+    const activate = new EmbedBuilder()
+      .setColor(0x57f287)
+      .setTitle('🔑 Jak wpisać kod licencyjny')
+      .setDescription([
+        '**Krok 1 – Zdobądź kod**',
+        '• Na kanale z panelem licencji kliknij **„Zobacz swoją licencję”**.',
+        '• Bot wyśle Ci kod w **wiadomości prywatnej**. Jeśli nic nie przyszło, włącz wiadomości prywatne od członków serwera (Ustawienia serwera → Ustawienia prywatności) i kliknij przycisk jeszcze raz.',
+        '',
+        '**Krok 2 – Skopiuj kod**',
+        '• Kod wygląda tak: `XXXX-XXXX-XXXX-XXXX`. Zaznacz go i wciśnij `Ctrl + C`.',
+        '',
+        '**Krok 3 – Wklej kod w grze**',
+        '• W oknie **„AutoRynek – licencja”** kliknij pole **Kod** i wciśnij `Ctrl + V`.',
+        '• Kliknij **Aktywuj**.',
+        '• Gdy zobaczysz **„Licencja aktywna”** – gotowe! Przy następnych uruchomieniach nie musisz wpisywać kodu ponownie.',
+        '• Okno możesz też otworzyć komendą w czacie: `/autorynek licencja XXXX-XXXX-XXXX-XXXX`.',
+        '',
+        '**⚠️ Ważne**',
+        '• Kod działa **tylko na jednym komputerze** – pierwsze użycie przypisuje go do Twojego komputera.',
+        '• **Nikomu nie udostępniaj kodu.** Jeśli ktoś użyje go pierwszy, Ty stracisz licencję.',
+        '• Zmieniasz komputer? Napisz do administracji, a wystawi nowy kod.',
+        '',
+        '**Co oznaczają komunikaty?**',
+        '• *nieprawidłowy kod* – kod jest błędny, skopiuj go jeszcze raz,',
+        '• *kod jest już użyty na innym komputerze* – licencja jest przypisana do innego komputera,',
+        '• *licencja wygasła / została unieważniona* – skontaktuj się z administracją,',
+        '• *Nie można połączyć z serwerem licencji* – sprawdź internet i spróbuj za chwilę.',
+      ].join('\n'));
+
+    return { embeds: [install, activate] };
+  }
+
+  // ================= panel licencji =================
+  function panelMessage() {
+    const embed = new EmbedBuilder()
+      .setColor(0xf5c542)
+      .setTitle(`🔑 PANEL LICENCJI ${serverName.toUpperCase()}`)
+      .setDescription('Kliknij przycisk poniżej, aby zobaczyć swoją licencję albo instrukcję instalacji moda.');
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('panel:lic').setLabel('Zobacz swoją licencję').setEmoji('🔑').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('panel:help').setLabel('Jak zainstalować moda').setEmoji('📖').setStyle(ButtonStyle.Primary),
+    );
+    return { embeds: [embed], components: [row] };
+  }
+
+  /** Licencje kupujacego (kod + data wygasniecia + ostrzezenie) - idzie na PV. */
+  function ownerMessage(list) {
+    const embeds = list.map(lic => {
+      const st = statusOf(lic);
+      return new EmbedBuilder()
+        .setColor(st.color)
+        .setTitle(`🔑 Twoja licencja AutoRynek (${serverName})`)
+        .addFields(
+          { name: 'Kod licencyjny', value: `\`\`\`${lic.key}\`\`\`` },
+          { name: 'Status', value: st.text },
+          { name: 'Wygasa', value: expiryText(lic) },
+          { name: '⚠️ Uwaga', value: '**Nikomu nie udostępniaj tego kodu!** Działa tylko na jednym komputerze – jeśli ktoś użyje go pierwszy, stracisz licencję.' },
+          { name: 'Jak użyć', value: 'W grze wklej kod w oknie licencji i kliknij **Aktywuj** (albo wpisz `/autorynek licencja KOD`).' },
+        );
+    });
+    return { embeds: embeds.slice(0, 10) };
+  }
+
+  async function handleMyLicense(i) {
+    const mine = store.byDiscord(i.user.id).filter(l => !l.revoked);
+    if (!mine.length) {
+      return i.reply({ content: '❌ Nie masz żadnej aktywnej licencji. Jeśli ją kupiłeś, napisz do administracji.', flags: EPHEMERAL });
+    }
+    const payload = ownerMessage(mine);
+    try {
+      await i.user.send(payload);
+      return i.reply({ content: '📩 Wysłałem Ci licencję w wiadomości prywatnej.', flags: EPHEMERAL });
+    } catch {
+      return i.reply({
+        content: '⚠️ Nie mogę wysłać wiadomości prywatnej (masz je zablokowane). Twoja licencja poniżej – widzisz ją tylko Ty:',
+        ...payload, flags: EPHEMERAL,
+      });
+    }
+  }
+
+  // ================= propozycje =================
+  function voteRow(sug) {
+    return new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('vote:up').setLabel(`Jestem za! (${osob(sug.up.length)})`).setEmoji('👍').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('vote:down').setLabel(`Jestem przeciw! (${osob(sug.down.length)})`).setEmoji('👎').setStyle(ButtonStyle.Danger),
+    );
+  }
+
+  async function handleVote(i, dir) {
+    const sug = store.getSuggestion(i.message.id) || { up: [], down: [] };
+    const uid = i.user.id;
+    const wasUp = sug.up.includes(uid), wasDown = sug.down.includes(uid);
+    sug.up = sug.up.filter(x => x !== uid);
+    sug.down = sug.down.filter(x => x !== uid);
+    if (dir === 'up' && !wasUp) sug.up.push(uid);      // drugie klikniecie = cofniecie glosu
+    if (dir === 'down' && !wasDown) sug.down.push(uid);
+    store.putSuggestion(i.message.id, sug);
+    return i.update({ components: [voteRow(sug)] });
+  }
+
+  /** Zamienia zwykla wiadomosc gracza na kanale propozycji w ladny embed z glosowaniem i watkiem. */
+  async function convertToSuggestion(message) {
+    const tresc = (message.content || '').trim();
+    const img = message.attachments.find(a => (a.contentType || '').startsWith('image/'));
+    if (!tresc && !img) return;
+
+    const embed = new EmbedBuilder()
+      .setColor(0x2b2d31)
+      .setTitle('Nowa propozycja')
+      .addFields({ name: 'Autor propozycji:', value: `<@${message.author.id}>` })
+      .setThumbnail(message.author.displayAvatarURL({ size: 256 }));
+    const text = tresc || '(bez tekstu)';
+    if (text.length <= 1024) embed.addFields({ name: 'Treść propozycji:', value: text });
+    else embed.addFields({ name: 'Treść propozycji:', value: text.slice(0, 1021) + '...' });
+
+    const payload = { embeds: [embed] };
+    if (img) {
+      // zalacznik wgrywamy ponownie, bo po usunieciu oryginalu jego link przestaje dzialac
+      const name = (img.name || 'obraz.png').replace(/[^A-Za-z0-9._-]/g, '_');
+      payload.files = [{ attachment: img.url, name }];
+      embed.setImage(`attachment://${name}`);
+    } else if (env.BANNER_URL) {
+      embed.setImage(env.BANNER_URL);
+    }
+
+    const sug = { up: [], down: [] };
+    payload.components = [voteRow(sug)];
+
+    let msg;
+    try {
+      msg = await message.channel.send(payload);
+    } catch (e) {
+      console.error('Nie udalo sie wyslac propozycji:', e.message);
+      return; // oryginalu nie kasujemy, zeby tresc nie przepadla
+    }
+    store.putSuggestion(msg.id, sug);
+    try { await message.delete(); } catch (e) { console.error('Nie udalo sie usunac wiadomosci (brak "Zarzadzanie wiadomosciami"?):', e.message); }
+    try {
+      await msg.startThread({ name: `Dyskusja: ${tresc || 'propozycja'}`.replace(/\s+/g, ' ').slice(0, 90), autoArchiveDuration: 1440 });
+    } catch (e) { console.error('Nie udalo sie utworzyc watku:', e.message); }
+  }
+
+  client.on(Events.MessageCreate, async message => {
+    if (!env.PROPOSALS_CHANNEL_ID || message.channelId !== env.PROPOSALS_CHANNEL_ID) return;
+    if (message.author.bot || message.system) return;
+    try { await convertToSuggestion(message); } catch (e) { console.error(e); }
+  });
+
+  // ================= komendy =================
+  const licencjaCmd = new SlashCommandBuilder()
     .setName('licencja')
     .setDescription('Tworzy jednorazowy kod licencyjny do moda')
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
@@ -75,6 +268,14 @@ export function createBot({ store, env }) {
     ))
     .addIntegerOption(o => o.setName('ilosc').setDescription('Ile sekund/minut/godzin/dni (pomiń przy permanentnej)')
       .setMinValue(1).setMaxValue(3650 * 86400));
+
+  const panelCmd = new SlashCommandBuilder()
+    .setName('panel').setDescription('Wysyła na kanał panel licencji (przyciski dla graczy)')
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild);
+
+  const instrukcjaCmd = new SlashCommandBuilder()
+    .setName('instrukcja').setDescription('Wysyła na kanał instrukcję instalacji moda i wpisania kodu')
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild);
 
   async function handleCreate(i) {
     if (!isAdmin(i)) return i.reply({ content: '❌ Nie masz uprawnień.', flags: EPHEMERAL });
@@ -91,6 +292,13 @@ export function createBot({ store, env }) {
       });
     }
 
+    // kanal dla administracji (LICENSE_CHANNEL_ID); gdy nie ustawiony - kanal, na ktorym uzyto komendy
+    let channel = i.channel;
+    if (env.LICENSE_CHANNEL_ID) {
+      try { channel = await client.channels.fetch(env.LICENSE_CHANNEL_ID); }
+      catch { return i.reply({ content: '❌ Nie widzę kanału licencji. Sprawdź `LICENSE_CHANNEL_ID` i uprawnienia bota.', flags: EPHEMERAL }); }
+    }
+
     let key;
     do { key = genKey(); } while (store.has(key));
     const now = Date.now();
@@ -100,25 +308,40 @@ export function createBot({ store, env }) {
       expiresAt: dur.perm ? null : now + dur.ms,
       hwid: null, activatedAt: null, lastSeen: null,
       revoked: false,
+      createdById: i.user.id,
       createdByTag: i.user.tag ?? i.user.username,
-      channelId: i.channelId, messageId: null,
+      channelId: channel.id, messageId: null,
     };
 
-    store.put(lic); // zapisz od razu, zeby kod dzialal nawet gdyby wyslanie wiadomosci sie nie udalo
-
-    // publiczna wiadomosc na kanale, na ktorym uzyto komendy - widoczna dla wszystkich
-    await i.reply({ content: `<@${user.id}>`, ...buildMessage(lic) });
     try {
-      const msg = await i.fetchReply();
+      const msg = await channel.send(buildMessage(lic));
       lic.messageId = msg.id;
-      store.put(lic);
-    } catch (e) { console.error('Nie udalo sie pobrac wiadomosci:', e.message); }
+    } catch (e) {
+      return i.reply({ content: `❌ Nie mogę wysłać na kanał licencji: ${e.message}`, flags: EPHEMERAL });
+    }
+    store.put(lic);
+
+    return i.reply({
+      content: `✅ Licencja utworzona dla <@${user.id}>.\n**Kod:** \`${key}\` (widzisz go tylko Ty)\n`
+        + `Kupujący zobaczy kod po kliknięciu „Zobacz swoją licencję” w panelu (dostanie go w wiadomości prywatnej).\n`
+        + `Wiadomość dla administracji: <#${channel.id}>.`,
+      flags: EPHEMERAL,
+    });
   }
 
-  // ---------- przyciski ----------
+  // ================= przyciski =================
   async function handleButton(i) {
+    const [action, arg] = i.customId.split(':');
+
+    if (action === 'panel') {
+      if (arg === 'lic') return handleMyLicense(i);
+      return i.reply({ ...helpMessage(), flags: EPHEMERAL });
+    }
+    if (action === 'vote') return handleVote(i, arg);
+
+    // ponizej: tylko administracja
     if (!isAdmin(i)) return i.reply({ content: '❌ Nie masz uprawnień.', flags: EPHEMERAL });
-    const [action, key] = i.customId.split(':');
+    const key = arg;
     const lic = store.get(key);
     if (!lic) return i.reply({ content: '❌ Nie ma takiej licencji w bazie.', flags: EPHEMERAL });
 
@@ -169,8 +392,16 @@ export function createBot({ store, env }) {
 
   client.on(Events.InteractionCreate, async i => {
     try {
-      if (i.isChatInputCommand() && i.commandName === 'licencja') await handleCreate(i);
-      else if (i.isButton()) await handleButton(i);
+      if (i.isChatInputCommand()) {
+        if (i.commandName === 'licencja') await handleCreate(i);
+        else if (i.commandName === 'panel') {
+          if (!isAdmin(i)) return i.reply({ content: '❌ Nie masz uprawnień.', flags: EPHEMERAL });
+          await i.reply(panelMessage());
+        } else if (i.commandName === 'instrukcja') {
+          if (!isAdmin(i)) return i.reply({ content: '❌ Nie masz uprawnień.', flags: EPHEMERAL });
+          await i.reply(helpMessage());
+        }
+      } else if (i.isButton()) await handleButton(i);
       else if (i.isModalSubmit()) await handleModal(i);
     } catch (e) {
       console.error(e);
@@ -181,17 +412,41 @@ export function createBot({ store, env }) {
     }
   });
 
+  // ================= powitania =================
+  client.on(Events.GuildMemberAdd, async member => {
+    if (!env.WELCOME_CHANNEL_ID) return;
+    try {
+      const ch = await client.channels.fetch(env.WELCOME_CHANNEL_ID);
+      const embed = new EmbedBuilder()
+        .setColor(0x5865f2)
+        .setTitle(`Witaj w ${serverName}!`)
+        .setDescription([
+          `Witaj ${member}!`,
+          '',
+          `Właśnie dołączyłeś na oficjalny serwer Discord **${serverName}**.`,
+          'Mamy nadzieję, że zostaniesz z nami na dłużej!',
+          '',
+          `Aktualna liczba członków: **${member.guild.memberCount}**`,
+        ].join('\n'))
+        .setThumbnail(member.user.displayAvatarURL({ size: 256 }))
+        .setFooter({ text: `Witaj w ${serverName}!` });
+      if (env.WELCOME_IMAGE_URL) embed.setImage(env.WELCOME_IMAGE_URL);
+      await ch.send({ embeds: [embed] });
+    } catch (e) { console.error('Powitanie nie wyszlo:', e.message); }
+  });
+
   client.once(Events.ClientReady, async c => {
     console.log(`Bot zalogowany jako ${c.user.tag}`);
+    const cmds = [licencjaCmd, panelCmd, instrukcjaCmd].map(x => x.toJSON());
     try {
       if (env.GUILD_ID) {
         const guild = await c.guilds.fetch(env.GUILD_ID);
-        await guild.commands.set([command.toJSON()]);   // od razu widoczna
+        await guild.commands.set(cmds);   // od razu widoczne
       } else {
-        await c.application.commands.set([command.toJSON()]); // globalnie (do godziny)
+        await c.application.commands.set(cmds); // globalnie (do godziny)
       }
-      console.log('Komenda /licencja zarejestrowana.');
-    } catch (e) { console.error('Rejestracja komendy nie powiodla sie:', e.message); }
+      console.log('Komendy zarejestrowane: /licencja /panel /instrukcja');
+    } catch (e) { console.error('Rejestracja komend nie powiodla sie:', e.message); }
   });
 
   return { client, refreshMessage };
