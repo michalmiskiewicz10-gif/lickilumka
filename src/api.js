@@ -70,7 +70,7 @@ export function createApi({ store, privateKey, onActivated, log = console }) {
       const exp = r.ok ? (r.lic.expiresAt ?? 0) : 0; // 0 = permanentna
       send(200, signed({ ok: r.ok, reason: r.reason, nonce, exp, ts: Date.now() }));
       if (r.ok && r.activated) {
-        log.log(`[licencja] aktywowano ${key} (${r.lic.nick})`);
+        log.log(`[licencja] aktywowano ${key} (<@${r.lic.discordId}>)`);
         try { onActivated?.(r.lic); } catch (e) { log.error(e); }
       }
     });

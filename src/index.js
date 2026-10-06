@@ -8,7 +8,7 @@ import { createBot } from './bot.js';
 try { process.loadEnvFile(); } catch { /* brak .env - uzyje zmiennych srodowiskowych */ }
 const env = process.env;
 
-for (const k of ['DISCORD_TOKEN', 'LICENSE_CHANNEL_ID', 'SIGNING_PRIVATE_KEY']) {
+for (const k of ['DISCORD_TOKEN', 'SIGNING_PRIVATE_KEY']) {
   if (!env[k]) { console.error(`Brakuje ${k} w pliku .env`); process.exit(1); }
 }
 

@@ -29,10 +29,10 @@ export function createBot({ store, env }) {
       .setTitle('🔑 Licencja AutoRynek')
       .setColor(color)
       .addFields(
-        { name: 'Nick gracza', value: `\`${lic.nick}\``, inline: true },
-        { name: 'Discord', value: `<@${lic.discordId}>`, inline: true },
+        { name: 'Kupujący', value: `<@${lic.discordId}>`, inline: true },
         { name: 'Status', value: status, inline: false },
         { name: 'Kod licencyjny', value: `\`\`\`${lic.key}\`\`\`` },
+        { name: 'Jak użyć', value: 'W grze: `/autorynek licencja KOD` albo wklej kod w oknie licencji. Kod działa tylko na jednym komputerze.' },
         { name: 'Wygasa', value: expiryText(lic) },
       )
       .setFooter({ text: `Utworzył: ${lic.createdByTag}` })
@@ -65,8 +65,6 @@ export function createBot({ store, env }) {
     .setName('licencja')
     .setDescription('Tworzy jednorazowy kod licencyjny do moda')
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
-    .addStringOption(o => o.setName('nick').setDescription('Nick gracza w Minecrafcie').setRequired(true)
-      .setMinLength(1).setMaxLength(16))
     .addUserOption(o => o.setName('discord').setDescription('Użytkownik Discorda, który kupuje licencję').setRequired(true))
     .addStringOption(o => o.setName('jednostka').setDescription('Na jak długo').setRequired(true).addChoices(
       { name: 'Sekundy', value: 's' },
@@ -81,14 +79,10 @@ export function createBot({ store, env }) {
   async function handleCreate(i) {
     if (!isAdmin(i)) return i.reply({ content: '❌ Nie masz uprawnień.', flags: EPHEMERAL });
 
-    const nick = i.options.getString('nick', true).trim();
     const user = i.options.getUser('discord', true);
     const unit = i.options.getString('jednostka', true);
     const amount = i.options.getInteger('ilosc');
 
-    if (!/^[A-Za-z0-9_]{1,16}$/.test(nick)) {
-      return i.reply({ content: '❌ Nick Minecraft: 1-16 znaków, tylko litery, cyfry i `_`.', flags: EPHEMERAL });
-    }
     const dur = parseDuration(unit, amount);
     if (!dur) {
       return i.reply({
@@ -97,43 +91,28 @@ export function createBot({ store, env }) {
       });
     }
 
-    const channelId = env.LICENSE_CHANNEL_ID;
-    let channel;
-    try { channel = await client.channels.fetch(channelId); }
-    catch { return i.reply({ content: '❌ Nie widzę kanału licencji. Sprawdź `LICENSE_CHANNEL_ID` i uprawnienia bota.', flags: EPHEMERAL }); }
-
     let key;
     do { key = genKey(); } while (store.has(key));
     const now = Date.now();
     const lic = {
-      key, nick, discordId: user.id,
+      key, discordId: user.id,
       createdAt: now,
       expiresAt: dur.perm ? null : now + dur.ms,
       hwid: null, activatedAt: null, lastSeen: null,
       revoked: false,
       createdByTag: i.user.tag ?? i.user.username,
-      channelId, messageId: null,
+      channelId: i.channelId, messageId: null,
     };
 
+    store.put(lic); // zapisz od razu, zeby kod dzialal nawet gdyby wyslanie wiadomosci sie nie udalo
+
+    // publiczna wiadomosc na kanale, na ktorym uzyto komendy - widoczna dla wszystkich
+    await i.reply({ content: `<@${user.id}>`, ...buildMessage(lic) });
     try {
-      const msg = await channel.send(buildMessage(lic));
+      const msg = await i.fetchReply();
       lic.messageId = msg.id;
-    } catch (e) {
-      return i.reply({ content: `❌ Nie mogę wysłać na kanał: ${e.message}`, flags: EPHEMERAL });
-    }
-    store.put(lic);
-
-    // kod do kupujacego w DM (jesli ma wylaczone DM - trudno, kod jest i tak na kanale)
-    let dm = '';
-    try {
-      await user.send(`🔑 Twój kod licencyjny do AutoRynek (nick **${nick}**):\n\`${key}\`\nW grze wpisz: \`/autorynek licencja ${key}\`\nKod działa tylko na jednym komputerze i tylko dla nicku **${nick}**.`);
-      dm = '\n📩 Kod wysłano też w DM do kupującego.';
-    } catch { dm = '\n⚠️ Nie udało się wysłać DM (kupujący ma zablokowane wiadomości).'; }
-
-    return i.reply({
-      content: `✅ Licencja utworzona.\n**Kod:** \`${key}\`\nWiadomość poszła na <#${channelId}>.${dm}`,
-      flags: EPHEMERAL,
-    });
+      store.put(lic);
+    } catch (e) { console.error('Nie udalo sie pobrac wiadomosci:', e.message); }
   }
 
   // ---------- przyciski ----------
