@@ -19,7 +19,7 @@ export function createLegit({ store, env, isAdmin, serverName }) {
   const embed = n => new EmbedBuilder()
     .setColor(0xf1c40f)
     .setTitle('⭐ LICZNIK LEGITCHECK')
-    .setDescription(`> Łączna liczba legitchecków: \`${n}\` ⭐\n> Dziękujemy za zaufanie i każde wystawione +rep! 🦆`)
+    .setDescription(`> Łączna liczba legitchecków: \`${n}\` ⭐\n> Dziękujemy za zaufanie i każde wystawione +rep!`)
     .setFooter({ text: `${serverName} LegitCheck` });
 
   async function handle(message) {

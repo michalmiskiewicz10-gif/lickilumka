@@ -24,7 +24,6 @@ const bot = createBot({ store, env });
 const api = createApi({
   store, privateKey,
   onActivated: lic => bot.refreshMessage(lic),
-  oauthCallback: q => bot.oauthCallback(q),
 });
 
 const port = parseInt(env.PORT || '8787', 10);

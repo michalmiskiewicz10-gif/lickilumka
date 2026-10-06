@@ -1,6 +1,6 @@
 import {
   ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, EmbedBuilder, MessageFlags,
-  PermissionFlagsBits as P, PermissionFlagsBits, SlashCommandBuilder, StringSelectMenuBuilder,
+  PermissionFlagsBits as P, PermissionFlagsBits, SlashCommandBuilder, StringSelectMenuBuilder, StringSelectMenuOptionBuilder,
 } from 'discord.js';
 
 const EPHEMERAL = MessageFlags.Ephemeral;
@@ -38,9 +38,8 @@ export function createTickets({ client, env, isAdmin, serverName }) {
     if (banner) embed.setImage(banner);
     const select = new StringSelectMenuBuilder()
       .setCustomId('ticket:select').setPlaceholder('Wybierz kategorię zgłoszenia')
-      .addOptions(Object.entries(CATS).map(([value, c]) => ({
-        label: c.label, description: c.desc, emoji: c.emoji, value,
-      })));
+      .addOptions(Object.entries(CATS).map(([value, c]) =>
+        new StringSelectMenuOptionBuilder().setLabel(c.label).setDescription(c.desc).setValue(value).setEmoji(c.emoji)));
     return { embeds: [embed], components: [new ActionRowBuilder().addComponents(select)] };
   }
 

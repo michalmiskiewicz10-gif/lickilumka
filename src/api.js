@@ -24,7 +24,7 @@ export function evaluate(store, { key, hwid }, now = Date.now()) {
   return { ok: true, reason: '', lic, activated };
 }
 
-export function createApi({ store, privateKey, onActivated, oauthCallback, log = console }) {
+export function createApi({ store, privateKey, onActivated, log = console }) {
   const hits = new Map(); // ip -> [timestamps]
 
   function rateLimited(ip) {
@@ -49,16 +49,6 @@ export function createApi({ store, privateKey, onActivated, oauthCallback, log =
       res.end(body);
     };
 
-    // przekierowanie po akceptacji aplikacji (weryfikacja OAuth2)
-    if (req.method === 'GET' && req.url.startsWith('/oauth/callback')) {
-      if (!oauthCallback) return send(404, 'not found');
-      const q = new URL(req.url, 'http://x').searchParams;
-      try {
-        const r = await oauthCallback({ code: q.get('code'), state: q.get('state'), error: q.get('error') });
-        res.writeHead(r.status, { 'Content-Type': 'text/html; charset=utf-8' });
-        return res.end(r.html);
-      } catch (e) { log.error(e); return send(500, 'error'); }
-    }
     if (req.method === 'GET' && req.url === '/') return send(200, 'ok');
     if (req.method !== 'POST' || req.url !== '/api/validate') return send(404, 'not found');
 

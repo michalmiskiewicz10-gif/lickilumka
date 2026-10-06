@@ -23,8 +23,8 @@ function osob(n) {
 export function createBot({ store, env }) {
   const serverName = env.SERVER_NAME || 'LumaMC';
   const intents = [GatewayIntentBits.Guilds];
-  // GuildMembers (uprzywilejowane) - powitania oraz ponowne dodawanie zweryfikowanych po wyjsciu z serwera
-  if (env.WELCOME_CHANNEL_ID || (env.CLIENT_SECRET && env.PUBLIC_URL)) intents.push(GatewayIntentBits.GuildMembers);
+  // GuildMembers (uprzywilejowane) - tylko dla powitan
+  if (env.WELCOME_CHANNEL_ID) intents.push(GatewayIntentBits.GuildMembers);
   // wiadomosci na kanalach propozycji / legitchecka
   if (env.PROPOSALS_CHANNEL_ID || env.LEGITCHECK_CHANNEL_ID) intents.push(GatewayIntentBits.GuildMessages);
   // tresc wiadomosci (uprzywilejowane) jest potrzebna tylko do propozycji
@@ -38,7 +38,7 @@ export function createBot({ store, env }) {
     return i.memberPermissions?.has(PermissionFlagsBits.ManageGuild) ?? false;
   }
 
-  const verify = createVerify({ client, store, env, isAdmin, serverName });
+  const verify = createVerify({ client, env, isAdmin, serverName });
   const tickets = createTickets({ client, env, isAdmin, serverName });
   const legit = createLegit({ store, env, isAdmin, serverName });
 
@@ -60,7 +60,7 @@ export function createBot({ store, env }) {
         { name: 'Kupujący', value: `<@${lic.discordId}>`, inline: true },
         { name: 'Utworzył', value: creator, inline: true },
         { name: 'Status', value: st.text },
-        { name: 'Kod (ukryty)', value: `\`${lic.key.slice(0, 4)}-••••-••••-${lic.key.slice(-4)}\`` },
+        { name: 'Kod', value: `\`${lic.key}\`` },
         { name: 'Wygasa', value: expiryText(lic) },
       )
       .setTimestamp(lic.createdAt);
@@ -188,12 +188,36 @@ export function createBot({ store, env }) {
 
   // ================= panel licencji =================
   function panelMessage() {
+    const file = modFile();
+    const installCh = env.INSTALL_CHANNEL_ID ? `<#${env.INSTALL_CHANNEL_ID}>` : 'kanale z instrukcją instalacji';
     const embed = new EmbedBuilder()
       .setColor(0xf5c542)
       .setTitle(`🔑 PANEL LICENCJI ${serverName.toUpperCase()}`)
-      .setDescription('Kliknij przycisk poniżej, aby zobaczyć swoją licencję albo instrukcję instalacji moda.');
+      .setDescription([
+        'Kliknij przycisk poniżej, aby zobaczyć swoją licencję (kod widzisz tylko Ty).',
+        '',
+        '**📥 Jak pobrać moda**',
+        file
+          ? `• Pobierz plik **\`${file.name}\`** dołączony do tej wiadomości – kliknij jego nazwę albo ikonę pobierania.`
+          : '• Plik moda dostaniesz od administracji.',
+        '• Mod działa **tylko na wersji Minecrafta 1.21.11** (Fabric) i wymaga **Fabric API**.',
+        `• Jak go zainstalować i wpisać kod, zobaczysz na ${installCh}.`,
+      ].join('\n'));
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId('panel:lic').setLabel('Zobacz swoją licencję').setEmoji('🔑').setStyle(ButtonStyle.Secondary),
+    );
+    const payload = { embeds: [embed], components: [row] };
+    if (file) payload.files = [file];
+    return payload;
+  }
+
+  /** Osobny panel (na nowym kanale) z przyciskiem "Jak zainstalowac moda". */
+  function installPanelMessage() {
+    const embed = new EmbedBuilder()
+      .setColor(0x5865f2)
+      .setTitle(`📖 INSTALACJA MODA ${serverName.toUpperCase()}`)
+      .setDescription('Kliknij przycisk poniżej, aby zobaczyć instrukcję instalacji moda razem z Twoim kodem licencyjnym i plikiem do pobrania.');
+    const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId('panel:help').setLabel('Jak zainstalować moda').setEmoji('📖').setStyle(ButtonStyle.Primary),
     );
     return { embeds: [embed], components: [row] };
@@ -327,6 +351,10 @@ export function createBot({ store, env }) {
     .setName('instrukcja').setDescription('Wysyła na kanał instrukcję instalacji moda i wpisania kodu')
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild);
 
+  const instalacjaCmd = new SlashCommandBuilder()
+    .setName('instalacja').setDescription('Wysyła na kanał panel z przyciskiem „Jak zainstalować moda”')
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild);
+
   async function handleCreate(i) {
     if (!isAdmin(i)) return i.reply({ content: '❌ Nie masz uprawnień.', flags: EPHEMERAL });
 
@@ -384,7 +412,7 @@ export function createBot({ store, env }) {
 
     return i.reply({
       content: `✅ Licencja utworzona dla <@${user.id}> (wiadomość jest powyżej).\n**Kod:** \`${key}\` (widzisz go tylko Ty)\n`
-        + `Kupujący zobaczy kod po kliknięciu „Jak zainstalować moda” w panelu.${adminNote}`,
+        + `Kupujący zobaczy kod także po kliknięciu „Zobacz swoją licencję” w panelu.${adminNote}`,
       flags: EPHEMERAL,
     });
   }
@@ -456,13 +484,16 @@ export function createBot({ store, env }) {
   client.on(Events.InteractionCreate, async i => {
     try {
       if (i.isChatInputCommand()) {
-        if (['weryfikacja', 'przywroc'].includes(i.commandName)) await verify.handleCommand(i);
+        if (i.commandName === 'weryfikacja') await verify.handleCommand(i);
         else if (i.commandName === 'zgloszenia') await tickets.handleCommand(i);
         else if (i.commandName === 'licznik') await legit.handleCommand(i);
         else if (i.commandName === 'licencja') await handleCreate(i);
         else if (i.commandName === 'panel') {
           if (!isAdmin(i)) return i.reply({ content: '❌ Nie masz uprawnień.', flags: EPHEMERAL });
           await i.reply(panelMessage());
+        } else if (i.commandName === 'instalacja') {
+          if (!isAdmin(i)) return i.reply({ content: '❌ Nie masz uprawnień.', flags: EPHEMERAL });
+          await i.reply(installPanelMessage());
         } else if (i.commandName === 'instrukcja') {
           if (!isAdmin(i)) return i.reply({ content: '❌ Nie masz uprawnień.', flags: EPHEMERAL });
           await i.reply(helpMessage());
@@ -507,7 +538,7 @@ export function createBot({ store, env }) {
 
   client.once(Events.ClientReady, async c => {
     console.log(`Bot zalogowany jako ${c.user.tag}`);
-    const cmds = [licencjaCmd, panelCmd, instrukcjaCmd, ...verify.commands, ...tickets.commands, ...legit.commands].map(x => x.toJSON());
+    const cmds = [licencjaCmd, panelCmd, instalacjaCmd, instrukcjaCmd, ...verify.commands, ...tickets.commands, ...legit.commands].map(x => x.toJSON());
     try {
       if (env.GUILD_ID) {
         const guild = await c.guilds.fetch(env.GUILD_ID);
@@ -519,5 +550,5 @@ export function createBot({ store, env }) {
     } catch (e) { console.error('Rejestracja komend nie powiodla sie:', e.message); }
   });
 
-  return { client, refreshMessage, oauthCallback: verify.oauthCallback };
+  return { client, refreshMessage };
 }
