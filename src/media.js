@@ -1,6 +1,6 @@
 import {
-  ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, MessageFlags, ModalBuilder,
-  PermissionFlagsBits, SlashCommandBuilder, TextInputBuilder, TextInputStyle,
+  ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, EmbedBuilder, MessageFlags, ModalBuilder,
+  PermissionFlagsBits, PermissionFlagsBits as P, SlashCommandBuilder, TextInputBuilder, TextInputStyle,
 } from 'discord.js';
 
 const EPHEMERAL = MessageFlags.Ephemeral;
@@ -13,13 +13,16 @@ const SESSION_TTL = 15 * 60_000;   // na odpowiedzi w PV gracz ma 15 min. od ost
  *  2. klik w przycisk             - bot pisze do gracza na PV i zadaje 3 pytania:
  *                                   nick z Minecrafta -> konto premium -> nazwa konta YT/TikTok
  *  3. PV: [Wyslij apelacje] / [Usun apelacje]
- *  4. kanal administracji         - podanie z przyciskami [Akceptuj] / [Odrzuc]
- *  5. akceptacja -> rola MEDIA_ROLE_ID nadana automatycznie + wiadomosc na PV
- *     odrzucenie -> wiadomosc na PV + cooldown (domyslnie 7 dni) na ponowne podanie
+ *  4. kazde podanie = OSOBNY kanal-ticket (w kategorii MEDIA_CATEGORY_ID) widoczny tylko dla administracji,
+ *     z przyciskami [Akceptuj] / [Odrzuc]
+ *  5. akceptacja -> rola MEDIA_ROLE_ID + wiadomosc na PV + kanal jest USUWANY
+ *     odrzucenie -> wiadomosc na PV + cooldown (domyslnie 7 dni) + kanal jest USUWANY
  */
 export function createMedia({ client, store, env, isAdmin, serverName }) {
   const roleId = env.MEDIA_ROLE_ID;
-  const reviewChannelId = env.MEDIA_REVIEW_CHANNEL_ID;
+  const categoryId = env.MEDIA_CATEGORY_ID || env.TICKET_CATEGORY_MEDIA || undefined;   // folder na tickety z podaniami
+  const staffRole = env.TICKET_STAFF_ROLE_ID;
+  const adminIds = (env.ADMIN_IDS || '').split(',').map(x => x.trim()).filter(Boolean);
   const cooldownDays = parseInt(env.MEDIA_COOLDOWN_DAYS || '7', 10) || 7;
   const cooldownMs = cooldownDays * DAY;
   const sessions = new Map();   // userId -> { step, data, exp }
@@ -119,8 +122,8 @@ export function createMedia({ client, store, env, isAdmin, serverName }) {
   }
 
   async function startApply(i) {
-    if (!reviewChannelId) {
-      return i.reply({ content: '❌ System Media nie jest jeszcze skonfigurowany (administracja musi ustawić `MEDIA_REVIEW_CHANNEL_ID`).', flags: EPHEMERAL });
+    if (!env.GUILD_ID) {
+      return i.reply({ content: '❌ System Media nie jest jeszcze skonfigurowany (brak `GUILD_ID`).', flags: EPHEMERAL });
     }
     const uid = i.user.id;
     const block = blocker(uid, i.member);
@@ -214,15 +217,31 @@ export function createMedia({ client, store, env, isAdmin, serverName }) {
       new ButtonBuilder().setCustomId(`media:rej:${uid}`).setLabel('Odrzuć').setEmoji('❌').setStyle(ButtonStyle.Danger),
     );
 
-    let msg;
+    let msg, ch;
     try {
-      const ch = await client.channels.fetch(reviewChannelId);
-      msg = await ch.send({ embeds: [embed], components: [row] });
+      const guild = await client.guilds.fetch(env.GUILD_ID);
+      const nickSafe = nick.toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 20) || 'gracz';
+      const overwrites = [
+        { id: guild.id, deny: [P.ViewChannel] },
+        { id: client.user.id, allow: [P.ViewChannel, P.SendMessages, P.ReadMessageHistory, P.EmbedLinks, P.ManageChannels, P.ManageRoles] },
+      ];
+      if (staffRole) overwrites.push({ id: staffRole, allow: [P.ViewChannel, P.SendMessages, P.ReadMessageHistory] });
+      for (const id of adminIds) overwrites.push({ id, allow: [P.ViewChannel, P.SendMessages, P.ReadMessageHistory] });
+      ch = await guild.channels.create({
+        name: `media-${nickSafe}`, type: ChannelType.GuildText,
+        parent: categoryId, topic: `media:${uid}`, permissionOverwrites: overwrites,
+      });
+      msg = await ch.send({
+        content: staffRole ? `<@&${staffRole}>` : undefined,
+        embeds: [embed], components: [row],
+        allowedMentions: { roles: staffRole ? [staffRole] : [] },
+      });
     } catch (e) {
-      console.error('Podanie Media - wysylka na kanal administracji:', e.message);
-      return i.reply({ content: '❌ Nie udało się wysłać podania do administracji. Spróbuj za chwilę albo napisz do administracji.', flags: EPHEMERAL });
+      console.error('Podanie Media - tworzenie ticketu:', e);
+      if (ch) ch.delete('Nieudane podanie Media').catch(() => {});
+      return i.reply({ content: '❌ Nie udało się wysłać podania do administracji (sprawdź `MEDIA_CATEGORY_ID` i uprawnienia bota). Spróbuj za chwilę albo napisz do administracji.', flags: EPHEMERAL });
     }
-    store.putMedia({ id: msg.id, userId: uid, nick, premium, acct, status: 'pending', createdAt: Date.now() });
+    store.putMedia({ id: msg.id, channelId: ch.id, userId: uid, nick, premium, acct, status: 'pending', createdAt: Date.now() });
     sessions.delete(uid);
 
     return i.update({
@@ -234,6 +253,16 @@ export function createMedia({ client, store, env, isAdmin, serverName }) {
 
   // ================= decyzja administracji =================
   const setStatus = (embed, value) => embed.setFields((embed.data.fields || []).map(f => (f.name === 'Status' ? { ...f, value } : f)));
+
+  /** Po decyzji kanal-ticket z podaniem jest kasowany (po chwili, zeby admin zobaczyl potwierdzenie). */
+  function deleteTicket(app, fallbackChannel) {
+    const chId = app?.channelId || fallbackChannel?.id;
+    if (!chId) return;
+    setTimeout(async () => {
+      try { const ch = await client.channels.fetch(chId); await ch.delete('Podanie Media rozpatrzone'); }
+      catch (e) { console.error('Podanie Media - usuwanie kanalu:', e.message); }
+    }, 4000);
+  }
 
   async function dmUser(userId, payload) {
     try { const u = await client.users.fetch(userId); await u.send(payload); return true; }
@@ -257,8 +286,9 @@ export function createMedia({ client, store, env, isAdmin, serverName }) {
 
     app.status = 'accepted'; app.decidedBy = i.user.id; app.decidedAt = Date.now();
     store.putMedia(app);
-    const embed = setStatus(EmbedBuilder.from(i.message.embeds[0]).setColor(0x57f287), `✅ Zaakceptowano przez <@${i.user.id}> – ranga nadana`);
+    const embed = setStatus(EmbedBuilder.from(i.message.embeds[0]).setColor(0x57f287), `✅ Zaakceptowano przez <@${i.user.id}> – ranga nadana (kanał zostanie usunięty za chwilę)`);
     await i.update({ embeds: [embed], components: [] });
+    deleteTicket(app, i.channel);
 
     const sent = await dmUser(uid, { embeds: [new EmbedBuilder().setColor(0x57f287).setTitle('🎉 Podanie zaakceptowane!')
       .setDescription(`Twoje podanie na **Media** w **${serverName}** zostało zaakceptowane. Otrzymałeś rangę **Media** – witamy w ekipie!`)] });
@@ -297,6 +327,7 @@ export function createMedia({ client, store, env, isAdmin, serverName }) {
     } else {
       await i.reply({ content: '❌ Podanie odrzucone.', flags: EPHEMERAL });
     }
+    deleteTicket(app, i.channel);
 
     const s = Math.floor(until / 1000);
     const dmEmbed = new EmbedBuilder().setColor(0xed4245).setTitle('❌ Podanie odrzucone')

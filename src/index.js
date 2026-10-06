@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { Store } from './store.js';
 import { createApi } from './api.js';
 import { createBot } from './bot.js';
+import { findAsset } from './assets.js';
 
 try { process.loadEnvFile(); } catch { /* brak .env - uzyje zmiennych srodowiskowych */ }
 const env = process.env;
@@ -19,6 +20,14 @@ const privateKey = crypto.createPrivateKey({
 const dir = path.dirname(fileURLToPath(import.meta.url));
 const dataDir = env.DATA_DIR || path.join(dir, '..', 'data');   // na Railway: ustaw DATA_DIR na sciezke Volume
 const store = new Store(path.join(dataDir, 'licenses.json'));
+
+for (const n of ['kot', 'welcome', 'ticket']) {
+  const a = findAsset(n);
+  console.log(`[grafika] assets/${n}: ${a ? 'znaleziono (' + a.name + ')' : 'brak'}`);
+}
+if (!findAsset('welcome', 'kot') && env.WELCOME_IMAGE_URL) {
+  console.warn('[grafika] UWAGA: brak assets/kot.png na serwerze - powitanie uzyje WELCOME_IMAGE_URL; linki z Discorda (cdn.discordapp.com) wygasaja i obrazek sie nie laduje. Upewnij sie, ze folder assets/ jest wdrozony.');
+}
 
 const bot = createBot({ store, env });
 const api = createApi({

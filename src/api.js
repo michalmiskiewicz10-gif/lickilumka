@@ -11,6 +11,8 @@ export function evaluate(store, { key, hwid }, now = Date.now()) {
   if (!lic) return { ok: false, reason: 'not_found' };
   if (lic.revoked) return { ok: false, reason: 'revoked' };
   if (lic.expiresAt != null && now >= lic.expiresAt) return { ok: false, reason: 'expired' };
+  // po resecie HWID stary komputer jest zablokowany dla tego kodu (nie da sie go ponownie przypiac)
+  if (lic.bannedHwids?.includes(hwid)) return { ok: false, reason: 'hwid' };
   if (lic.hwid && lic.hwid !== hwid) return { ok: false, reason: 'hwid' };
 
   let activated = false;

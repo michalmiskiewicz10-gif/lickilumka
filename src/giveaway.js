@@ -35,21 +35,27 @@ export function createGiveaway({ client, store, isAdmin }) {
       .addStringOption(o => o.setName('id').setDescription('ID wiadomości konkursu (domyślnie: ostatni zakończony na tym kanale)'))
       .addIntegerOption(o => o.setName('ilosc').setDescription('Ilu nowych zwycięzców (domyślnie 1)').setMinValue(1).setMaxValue(20)));
 
+  const stopCmd = new SlashCommandBuilder()
+    .setName('konkurs_wylacz').setDescription('Wyłącza trwający konkurs (anuluje go albo kończy od razu z losowaniem)')
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+    .addStringOption(o => o.setName('id').setDescription('ID wiadomości konkursu (domyślnie: trwający konkurs na tym kanale)'))
+    .addBooleanOption(o => o.setName('losuj').setDescription('Zakończ od razu i wylosuj zwycięzców (domyślnie: nie – konkurs jest po prostu anulowany)'));
+
   function embedFor(gw) {
     const ended = !!gw.ended;
     const s = Math.floor(gw.endsAt / 1000);
     const embed = new EmbedBuilder()
       .setColor(ended ? 0x808080 : 0xf5c542)
-      .setTitle(ended ? '🎉 KONKURS – ZAKOŃCZONY' : '🎉 KONKURS')
+      .setTitle(gw.cancelled ? '🚫 KONKURS – ANULOWANY' : ended ? '🎉 KONKURS – ZAKOŃCZONY' : '🎉 KONKURS')
       .setDescription(`## 🎁 ${gw.prize}`)
       .addFields(
         { name: '📋 Wymagania', value: gw.requirements },
         { name: '🏆 Liczba zwycięzców', value: String(gw.winnersCount), inline: true },
         { name: '👥 Uczestnicy', value: String(gw.participants.length), inline: true },
         { name: '🎤 Organizator', value: `<@${gw.hostId}>`, inline: true },
-        { name: ended ? '⏰ Zakończył się' : '⏰ Koniec', value: `<t:${s}:F>\n(<t:${s}:R>)` },
+        { name: ended ? '⏰ Planowany koniec' : '⏰ Koniec', value: `<t:${s}:F>\n(<t:${s}:R>)` },
       );
-    if (ended) {
+    if (ended && !gw.cancelled) {
       const w = allWinners(gw);
       embed.addFields({ name: '🏅 Zwycięzcy', value: w.length ? clip(w.map(id => `<@${id}>`).join(', ')) : 'Brak – nikt nie wziął udziału.' });
     }
@@ -58,7 +64,7 @@ export function createGiveaway({ client, store, isAdmin }) {
 
   const joinRow = gw => new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('gw:join')
-      .setLabel(gw.ended ? 'Konkurs zakończony' : `Weź udział (${gw.participants.length})`)
+      .setLabel(gw.cancelled ? 'Konkurs anulowany' : gw.ended ? 'Konkurs zakończony' : `Weź udział (${gw.participants.length})`)
       .setEmoji('🎉').setStyle(gw.ended ? ButtonStyle.Secondary : ButtonStyle.Primary).setDisabled(!!gw.ended),
   );
 
@@ -135,6 +141,32 @@ export function createGiveaway({ client, store, isAdmin }) {
     return i.reply({ content: `✅ Konkurs utworzony – skończy się <t:${Math.floor(gw.endsAt / 1000)}:R>.`, flags: EPHEMERAL });
   }
 
+  async function handleStop(i) {
+    if (!isAdmin(i)) return i.reply({ content: '❌ Nie masz uprawnień.', flags: EPHEMERAL });
+    let id = i.options.getString('id');
+    if (id) { const m = id.match(/(\d{15,25})\s*$/); id = m ? m[1] : id.trim(); }
+    const gw = id
+      ? store.getGiveaway(id)
+      : store.allGiveaways().filter(g => !g.ended && g.channelId === i.channelId).sort((a, b) => b.createdAt - a.createdAt)[0];
+    if (!gw) return i.reply({ content: '❌ Nie znalazłem trwającego konkursu. Użyj tej komendy na kanale konkursu albo podaj `id` wiadomości.', flags: EPHEMERAL });
+    if (gw.ended) return i.reply({ content: '⌛ Ten konkurs jest już zakończony lub anulowany.', flags: EPHEMERAL });
+
+    if (i.options.getBoolean('losuj')) {
+      await i.deferReply({ flags: EPHEMERAL });
+      await finish(gw);
+      return i.editReply('🏁 Konkurs zakończony od razu – zwycięzcy wylosowani.');
+    }
+
+    gw.ended = true; gw.cancelled = true; gw.endedAt = Date.now(); gw.cancelledBy = i.user.id;
+    store.putGiveaway(gw);
+    try {
+      const ch = await client.channels.fetch(gw.channelId);
+      const msg = await ch.messages.fetch(gw.id);
+      await msg.edit({ embeds: [embedFor(gw)], components: [joinRow(gw)] });
+    } catch (e) { console.error('Konkurs - edycja po anulowaniu:', e.message); }
+    return i.reply({ content: '🚫 Konkurs wyłączony (anulowany) – nikt nie został wylosowany.', flags: EPHEMERAL });
+  }
+
   async function handleJoin(i) {
     const gw = store.getGiveaway(i.message.id);
     if (!gw) return i.reply({ content: '❌ Nie znaleziono tego konkursu w bazie.', flags: EPHEMERAL });
@@ -190,10 +222,11 @@ export function createGiveaway({ client, store, isAdmin }) {
   }
 
   return {
-    commands: [konkursCmd, rollCmd],
+    commands: [konkursCmd, rollCmd, stopCmd],
     start() { setInterval(tick, 5000).unref?.(); tick(); },   // sprawdzanie koncow konkursow co 5 s
     handleCommand: async i => {
       if (i.commandName === 'konkurs') return handleCreate(i);
+      if (i.commandName === 'konkurs_wylacz') return handleStop(i);
       if (i.commandName === 'roll' && i.options.getSubcommand() === 'konkurs') return handleRoll(i);
     },
     handleButton: i => (i.customId === 'gw:join' ? handleJoin(i) : null),

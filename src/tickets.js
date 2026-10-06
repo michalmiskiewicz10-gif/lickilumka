@@ -77,22 +77,17 @@ export function createTickets({ client, env, isAdmin, serverName }) {
   const isArchived = ch => /^archiwum:\d+:/.test(ch?.topic || '');
   const isStaffMember = i => (!!staffRole && i.member?.roles?.cache?.has(staffRole)) || isAdmin(i);
 
-  async function handleSelect(i) {
-    const key = i.values[0];
+  /**
+   * Tworzy ticket danej kategorii dla uzytkownika z interakcji `i` (musi byc juz zdeferowana/odpowiedziana).
+   * Zwraca { ok, message, channel } - `message` to tekst dla gracza.
+   */
+  async function open(i, key, { extra = '' } = {}) {
     const cat = CATS[key];
-    // lista wyboru zostaje "zaznaczona" - odswiezamy ja, zeby mozna bylo wybrac ponownie (embed i grafika zostaja)
-    const resetPanel = () => i.message.edit({ components: [selectRow()] }).catch(() => {});
-
-    if (!cat) {
-      resetPanel();
-      return i.reply({ content: '❌ Ta kategoria nie jest już dostępna. Poproś administrację o nowy panel (`/zgloszenia`).', flags: EPHEMERAL });
-    }
-    await i.deferReply({ flags: EPHEMERAL });
-    resetPanel();
+    if (!cat) return { ok: false, message: '❌ Ta kategoria nie jest już dostępna. Poproś administrację o nowy panel.' };
 
     const guild = i.guild;
     const existing = guild.channels.cache.find(c => ownerOf(c) === i.user.id);
-    if (existing) return i.editReply(`❌ Masz już otwarte zgłoszenie: <#${existing.id}>`);
+    if (existing) return { ok: false, message: `❌ Masz już otwarte zgłoszenie: <#${existing.id}>` };
 
     const nick = (i.user.username || 'user').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 20) || 'user';
     const overwrites = [
@@ -113,13 +108,13 @@ export function createTickets({ client, env, isAdmin, serverName }) {
       });
     } catch (e) {
       console.error('Nie udalo sie utworzyc ticketu:', e.message);
-      return i.editReply(`❌ Nie udało się utworzyć zgłoszenia (sprawdź ID kategorii \`TICKET_CATEGORY_${key.toUpperCase()}\` i uprawnienie bota „Zarządzanie kanałami”).`);
+      return { ok: false, message: `❌ Nie udało się utworzyć zgłoszenia (sprawdź ID kategorii \`TICKET_CATEGORY_${key.toUpperCase()}\` i uprawnienie bota „Zarządzanie kanałami”).` };
     }
 
     const embed = new EmbedBuilder()
       .setColor(cat.color)
       .setTitle(`${cat.emoji} Zgłoszenie – ${cat.label}`)
-      .setDescription([`Witaj <@${i.user.id}>!`, '', cat.intro].join('\n'))
+      .setDescription([`Witaj <@${i.user.id}>!`, '', cat.intro, ...(extra ? ['', extra] : [])].join('\n'))
       .setFooter({ text: serverName });
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId('ticket:close').setLabel('Zamknij zgłoszenie').setEmoji('🔒').setStyle(ButtonStyle.Danger),
@@ -130,7 +125,16 @@ export function createTickets({ client, env, isAdmin, serverName }) {
       allowedMentions: { users: [i.user.id], roles: staffRole ? [staffRole] : [] },
     }).catch(e => console.error('Wiadomosc w tickecie:', e.message));
 
-    return i.editReply(`✅ Utworzono zgłoszenie: <#${ch.id}>`);
+    return { ok: true, message: `✅ Utworzono zgłoszenie: <#${ch.id}>`, channel: ch };
+  }
+
+  async function handleSelect(i) {
+    const key = i.values[0];
+    // lista wyboru zostaje "zaznaczona" - odswiezamy ja, zeby mozna bylo wybrac ponownie (embed i grafika zostaja)
+    i.message.edit({ components: [selectRow()] }).catch(() => {});
+    await i.deferReply({ flags: EPHEMERAL });
+    const r = await open(i, key);
+    return i.editReply(r.message);
   }
 
   /** "Usuniecie" ticketu przez gracza: gracz traci dostep, kanal wedruje do kategorii "Usuniete", reszta (administracja) zostaje. */
@@ -207,6 +211,7 @@ export function createTickets({ client, env, isAdmin, serverName }) {
       }
     },
     handleSelect,
+    open,
     handleButton: i => {
       if (i.customId === 'ticket:close') return handleClose(i);
       if (i.customId === 'ticket:delete') return handleDelete(i);

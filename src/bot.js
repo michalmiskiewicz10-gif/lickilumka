@@ -12,6 +12,7 @@ import { createTickets } from './tickets.js';
 import { createLegit } from './legit.js';
 import { createMedia } from './media.js';
 import { createGiveaway } from './giveaway.js';
+import { createShop } from './shop.js';
 import { MODS, DEFAULT_MOD } from './mods.js';
 import { findAsset } from './assets.js';
 
@@ -49,6 +50,7 @@ export function createBot({ store, env }) {
   const tickets = createTickets({ client, env, isAdmin, serverName });
   const legit = createLegit({ store, env, isAdmin, serverName });
   const media = createMedia({ client, store, env, isAdmin, serverName });
+  const shop = createShop({ client, env, isAdmin, serverName, tickets });
   const giveaway = createGiveaway({ client, store, isAdmin });
 
   // ================= wiadomosc o licencji =================
@@ -80,6 +82,8 @@ export function createBot({ store, env }) {
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId(`ext:${lic.key}`).setLabel('Przedłuż licencję')
         .setStyle(ButtonStyle.Success).setDisabled(dead),
+      new ButtonBuilder().setCustomId(`hwd:${lic.key}`).setLabel('Resetuj HWID')
+        .setStyle(ButtonStyle.Primary).setDisabled(dead || !lic.hwid),
       new ButtonBuilder().setCustomId(`rev:${lic.key}`).setLabel('Unieważnij licencję')
         .setStyle(ButtonStyle.Danger).setDisabled(dead),
     );
@@ -425,6 +429,42 @@ export function createBot({ store, env }) {
     });
   }
 
+  // ================= reset HWID =================
+  /** Odpina licencje od komputera; stary komputer zostaje zablokowany dla tego kodu. Zwraca tekst bledu albo null. */
+  function resetHwid(lic) {
+    if (lic.revoked) return 'Licencja jest unieważniona.';
+    if (!lic.hwid) return 'Ta licencja nie jest jeszcze przypisana do żadnego komputera (nie ma czego resetować).';
+    const banned = new Set(lic.bannedHwids || []);
+    banned.add(lic.hwid);
+    lic.bannedHwids = [...banned].slice(-10);
+    lic.hwid = null;
+    lic.activatedAt = null;
+    lic.hwidResets = (lic.hwidResets || 0) + 1;
+    lic.lastHwidReset = Date.now();
+    store.put(lic);
+    return null;
+  }
+
+  const resetCmd = new SlashCommandBuilder()
+    .setName('resethwid').setDescription('Resetuje HWID licencji - kod można wtedy użyć na innym komputerze')
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+    .addStringOption(o => o.setName('kod').setDescription('Kod licencji XXXX-XXXX-XXXX-XXXX').setRequired(true).setMaxLength(19));
+
+  async function handleResetCmd(i) {
+    if (!isAdmin(i)) return i.reply({ content: '❌ Nie masz uprawnień.', flags: EPHEMERAL });
+    const key = i.options.getString('kod', true).trim().toUpperCase();
+    const lic = store.get(key);
+    if (!lic) return i.reply({ content: '❌ Nie ma takiej licencji w bazie.', flags: EPHEMERAL });
+    const err = resetHwid(lic);
+    if (err) return i.reply({ content: `❌ ${err}`, flags: EPHEMERAL });
+    await refreshMessage(lic);
+    return i.reply({
+      content: `🔄 Zresetowano HWID licencji \`${key}\` (kupujący: <@${lic.discordId}>).\n`
+        + 'Stary komputer przestanie działać z tym kodem (mod sprawdza licencję co jakiś czas), a kod można aktywować na nowym komputerze.',
+      flags: EPHEMERAL,
+    });
+  }
+
   // ================= przyciski =================
   async function handleButton(i) {
     const [action, arg] = i.customId.split(':');
@@ -439,6 +479,7 @@ export function createBot({ store, env }) {
     if (action === 'verify') return verify.handleButton(i);
     if (action === 'ticket') return tickets.handleButton(i);
     if (action === 'media') return media.handleButton(i);
+    if (action === 'shop') return shop.handleButton(i);
     if (action === 'gw') return giveaway.handleButton(i);
     if (action === 'vote') return handleVote(i, arg);
 
@@ -447,6 +488,13 @@ export function createBot({ store, env }) {
     const key = arg;
     const lic = store.get(key);
     if (!lic) return i.reply({ content: '❌ Nie ma takiej licencji w bazie.', flags: EPHEMERAL });
+
+    if (action === 'hwd') {
+      const err = resetHwid(lic);
+      if (err) return i.reply({ content: `❌ ${err}`, flags: EPHEMERAL });
+      await i.update(buildMessage(lic));
+      return i.followUp({ content: `🔄 Zresetowano HWID licencji \`${key}\`. Stary komputer jest zablokowany, kod można aktywować na nowym.`, flags: EPHEMERAL });
+    }
 
     if (action === 'rev') {
       if (lic.revoked) return i.reply({ content: 'Ta licencja jest już unieważniona.', flags: EPHEMERAL });
@@ -500,7 +548,9 @@ export function createBot({ store, env }) {
         else if (i.commandName === 'zgloszenia') await tickets.handleCommand(i);
         else if (i.commandName === 'licznik') await legit.handleCommand(i);
         else if (i.commandName === 'media') await media.handleCommand(i);
-        else if (i.commandName === 'konkurs' || i.commandName === 'roll') await giveaway.handleCommand(i);
+        else if (i.commandName === 'konkurs' || i.commandName === 'konkurs_wylacz' || i.commandName === 'roll') await giveaway.handleCommand(i);
+        else if (i.commandName === 'cennik') await shop.handleCommand(i);
+        else if (i.commandName === 'resethwid') await handleResetCmd(i);
         else if (i.commandName === 'licencja') await handleCreate(i);
         else if (i.commandName === 'panel') {
           if (!isAdmin(i)) return i.reply({ content: '❌ Nie masz uprawnień.', flags: EPHEMERAL });
@@ -512,6 +562,7 @@ export function createBot({ store, env }) {
       } else if (i.isButton()) await handleButton(i);
       else if (i.isStringSelectMenu()) {
         if (i.customId === 'ticket:select') await tickets.handleSelect(i);
+        else if (i.customId === 'shop:select') await shop.handleSelect(i);
         else if (i.customId === 'panel:modsel') {
           await handleMyLicense(i, i.values[0]);
           i.message.edit({ components: [modSelectRow()] }).catch(() => {});   // zerujemy zaznaczenie na panelu
@@ -563,7 +614,7 @@ export function createBot({ store, env }) {
   client.once(Events.ClientReady, async c => {
     console.log(`Bot zalogowany jako ${c.user.tag}`);
     giveaway.start();
-    const cmds = [licencjaCmd, panelCmd, instalacjaCmd, ...verify.commands, ...tickets.commands, ...legit.commands, ...media.commands, ...giveaway.commands].map(x => x.toJSON());
+    const cmds = [licencjaCmd, panelCmd, instalacjaCmd, resetCmd, ...shop.commands, ...verify.commands, ...tickets.commands, ...legit.commands, ...media.commands, ...giveaway.commands].map(x => x.toJSON());
     try {
       if (env.GUILD_ID) {
         const guild = await c.guilds.fetch(env.GUILD_ID);
