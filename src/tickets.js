@@ -29,17 +29,17 @@ export function createTickets({ client, env, isAdmin, serverName }) {
     .setName('zgloszenia').setDescription('Wysyła na kanał panel systemu zgłoszeń (ticketów)')
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild);
 
-  function panelMessage() {
+  function panelMessage({ noBanner = false } = {}) {
     const embed = new EmbedBuilder()
       .setColor(0x2b2d31)
       .setTitle('System zgłoszeń')
       .setDescription('> Wybierz kategorię **zgłoszenia** z poniższego paska wyboru.');
     const banner = env.TICKET_BANNER_URL || env.BANNER_URL;
-    if (banner) embed.setImage(banner);
+    if (banner && !noBanner && /^https?:\/\//i.test(banner.trim())) embed.setImage(banner.trim());
     const select = new StringSelectMenuBuilder()
       .setCustomId('ticket:select').setPlaceholder('Wybierz kategorię zgłoszenia')
       .addOptions(Object.entries(CATS).map(([value, c]) =>
-        new StringSelectMenuOptionBuilder().setLabel(c.label).setDescription(c.desc).setValue(value).setEmoji(c.emoji)));
+        new StringSelectMenuOptionBuilder().setLabel(c.label).setDescription(c.desc).setValue(value).setEmoji({ name: c.emoji })));
     return { embeds: [embed], components: [new ActionRowBuilder().addComponents(select)] };
   }
 
@@ -115,7 +115,16 @@ export function createTickets({ client, env, isAdmin, serverName }) {
     handleCommand: async i => {
       if (i.commandName !== 'zgloszenia') return;
       if (!isAdmin(i)) return i.reply({ content: '❌ Nie masz uprawnień.', flags: EPHEMERAL });
-      return i.reply(panelMessage());
+      try { return await i.reply(panelMessage()); }
+      catch (e) {
+        console.error('Panel zgloszen (1. proba):', e);
+        // 2. proba: bez baneru (np. zly link w BANNER_URL)
+        try { return await i.reply(panelMessage({ noBanner: true })); }
+        catch (e2) {
+          console.error('Panel zgloszen (2. proba):', e2);
+          return i.reply({ content: `❌ Nie udało się wysłać panelu: ${e2.message}`, flags: EPHEMERAL });
+        }
+      }
     },
     handleSelect,
     handleButton: i => (i.customId === 'ticket:close' ? handleClose(i) : null),

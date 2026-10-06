@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import {
-  ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, MessageFlags,
+  ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, Events, MessageFlags,
   ModalBuilder, PermissionFlagsBits, SlashCommandBuilder, TextInputBuilder, TextInputStyle,
 } from 'discord.js';
 
@@ -29,6 +29,14 @@ export function createVerify({ client, env, isAdmin, serverName }) {
     const b = crypto.randomInt(1, a);             // wynik >= 1
     return { text: `${a} - ${b}`, answer: a - b };
   }
+
+  // kazdy nowy czlonek od razu dostaje range "niezweryfikowany" (UNVERIFIED_ROLE_ID); zabierana po weryfikacji
+  client.on(Events.GuildMemberAdd, async member => {
+    if (!unverifiedId || member.user.bot) return;
+    if (env.GUILD_ID && member.guild.id !== env.GUILD_ID) return;
+    try { await member.roles.add(unverifiedId); }
+    catch (e) { console.error('Nadanie roli niezweryfikowanego nie wyszlo (rola bota musi byc wyzej):', e.message); }
+  });
 
   const verifyCmd = new SlashCommandBuilder()
     .setName('weryfikacja').setDescription('Wysyła na kanał panel weryfikacji')

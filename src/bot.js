@@ -24,7 +24,7 @@ export function createBot({ store, env }) {
   const serverName = env.SERVER_NAME || 'LumaMC';
   const intents = [GatewayIntentBits.Guilds];
   // GuildMembers (uprzywilejowane) - tylko dla powitan
-  if (env.WELCOME_CHANNEL_ID) intents.push(GatewayIntentBits.GuildMembers);
+  if (env.WELCOME_CHANNEL_ID || env.UNVERIFIED_ROLE_ID) intents.push(GatewayIntentBits.GuildMembers);
   // wiadomosci na kanalach propozycji / legitchecka
   if (env.PROPOSALS_CHANNEL_ID || env.LEGITCHECK_CHANNEL_ID) intents.push(GatewayIntentBits.GuildMessages);
   // tresc wiadomosci (uprzywilejowane) jest potrzebna tylko do propozycji
@@ -150,7 +150,7 @@ export function createBot({ store, env }) {
     } else if (mine) {
       codeLines = ['• ❌ Nie masz jeszcze żadnej aktywnej licencji. Jeśli ją kupiłeś, napisz do administracji w zgłoszeniu.'];
     } else {
-      codeLines = ['• Kod zobaczysz po kliknięciu **„Jak zainstalować moda”** w panelu licencji – widzisz go tylko Ty.'];
+      codeLines = ['• Twój kod licencyjny jest w wiadomości z licencją (pole **Kod**). Możesz też kliknąć **„Sprawdź swoją licencję”** w panelu licencji.'];
     }
 
     const activate = new EmbedBuilder()
@@ -188,27 +188,14 @@ export function createBot({ store, env }) {
 
   // ================= panel licencji =================
   function panelMessage() {
-    const file = modFile();
-    const installCh = env.INSTALL_CHANNEL_ID ? `<#${env.INSTALL_CHANNEL_ID}>` : 'kanale z instrukcją instalacji';
     const embed = new EmbedBuilder()
       .setColor(0xf5c542)
       .setTitle(`🔑 PANEL LICENCJI ${serverName.toUpperCase()}`)
-      .setDescription([
-        'Kliknij przycisk poniżej, aby zobaczyć swoją licencję (kod widzisz tylko Ty).',
-        '',
-        '**📥 Jak pobrać moda**',
-        file
-          ? `• Pobierz plik **\`${file.name}\`** dołączony do tej wiadomości – kliknij jego nazwę albo ikonę pobierania.`
-          : '• Plik moda dostaniesz od administracji.',
-        '• Mod działa **tylko na wersji Minecrafta 1.21.11** (Fabric) i wymaga **Fabric API**.',
-        `• Jak go zainstalować i wpisać kod, zobaczysz na ${installCh}.`,
-      ].join('\n'));
+      .setDescription('Kliknij przycisk poniżej, aby sprawdzić swoją licencję (kod widzisz tylko Ty).');
     const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('panel:lic').setLabel('Zobacz swoją licencję').setEmoji('🔑').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('panel:lic').setLabel('Sprawdź swoją licencję').setEmoji('🔑').setStyle(ButtonStyle.Secondary),
     );
-    const payload = { embeds: [embed], components: [row] };
-    if (file) payload.files = [file];
-    return payload;
+    return { embeds: [embed], components: [row] };
   }
 
   /** Osobny panel (na nowym kanale) z przyciskiem "Jak zainstalowac moda". */
@@ -347,10 +334,6 @@ export function createBot({ store, env }) {
     .setName('panel').setDescription('Wysyła na kanał panel licencji (przyciski dla graczy)')
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild);
 
-  const instrukcjaCmd = new SlashCommandBuilder()
-    .setName('instrukcja').setDescription('Wysyła na kanał instrukcję instalacji moda i wpisania kodu')
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild);
-
   const instalacjaCmd = new SlashCommandBuilder()
     .setName('instalacja').setDescription('Wysyła na kanał panel z przyciskiem „Jak zainstalować moda”')
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild);
@@ -410,9 +393,13 @@ export function createBot({ store, env }) {
     }
     store.put(lic);
 
+    // zaraz pod licencja: plik z modem + instrukcja jak go pobrac i zainstalowac
+    try { await channel.send(helpMessage()); }
+    catch (e) { adminNote += `\n⚠️ Nie udało się wysłać instrukcji z plikiem moda: ${e.message}`; }
+
     return i.reply({
       content: `✅ Licencja utworzona dla <@${user.id}> (wiadomość jest powyżej).\n**Kod:** \`${key}\` (widzisz go tylko Ty)\n`
-        + `Kupujący zobaczy kod także po kliknięciu „Zobacz swoją licencję” w panelu.${adminNote}`,
+        + `Instrukcja i plik moda zostały wysłane pod licencją.${adminNote}`,
       flags: EPHEMERAL,
     });
   }
@@ -494,9 +481,6 @@ export function createBot({ store, env }) {
         } else if (i.commandName === 'instalacja') {
           if (!isAdmin(i)) return i.reply({ content: '❌ Nie masz uprawnień.', flags: EPHEMERAL });
           await i.reply(installPanelMessage());
-        } else if (i.commandName === 'instrukcja') {
-          if (!isAdmin(i)) return i.reply({ content: '❌ Nie masz uprawnień.', flags: EPHEMERAL });
-          await i.reply(helpMessage());
         }
       } else if (i.isButton()) await handleButton(i);
       else if (i.isStringSelectMenu()) { if (i.customId === 'ticket:select') await tickets.handleSelect(i); }
@@ -507,13 +491,23 @@ export function createBot({ store, env }) {
     } catch (e) {
       console.error(e);
       try {
-        const msg = { content: '❌ Wystąpił błąd.', flags: EPHEMERAL };
+        const msg = { content: '❌ Wystąpił błąd.' + (isAdmin(i) ? `\n\`${String(e.message).slice(0, 300)}\`` : ''), flags: EPHEMERAL };
         if (i.replied || i.deferred) await i.followUp(msg); else await i.reply(msg);
       } catch { /* ignoruj */ }
     }
   });
 
   // ================= powitania =================
+  /** Obrazek powitania: plik assets/welcome.(gif|png|jpg|jpeg|webp) ma pierwszenstwo przed WELCOME_IMAGE_URL (linki z Discorda wygasaja). */
+  function welcomeImage() {
+    const dir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'assets');
+    for (const ext of ['gif', 'png', 'jpg', 'jpeg', 'webp']) {
+      const f = path.join(dir, `welcome.${ext}`);
+      if (fs.existsSync(f)) return { attachment: f, name: `welcome.${ext}` };
+    }
+    return null;
+  }
+
   client.on(Events.GuildMemberAdd, async member => {
     if (!env.WELCOME_CHANNEL_ID) return;
     try {
@@ -531,14 +525,17 @@ export function createBot({ store, env }) {
         ].join('\n'))
         .setThumbnail(member.user.displayAvatarURL({ size: 256 }))
         .setFooter({ text: `Witaj w ${serverName}!` });
-      if (env.WELCOME_IMAGE_URL) embed.setImage(env.WELCOME_IMAGE_URL);
-      await ch.send({ embeds: [embed] });
+      const img = welcomeImage();
+      const payload = { embeds: [embed] };
+      if (img) { embed.setImage(`attachment://${img.name}`); payload.files = [img]; }
+      else if (env.WELCOME_IMAGE_URL) embed.setImage(env.WELCOME_IMAGE_URL);
+      await ch.send(payload);
     } catch (e) { console.error('Powitanie nie wyszlo:', e.message); }
   });
 
   client.once(Events.ClientReady, async c => {
     console.log(`Bot zalogowany jako ${c.user.tag}`);
-    const cmds = [licencjaCmd, panelCmd, instalacjaCmd, instrukcjaCmd, ...verify.commands, ...tickets.commands, ...legit.commands].map(x => x.toJSON());
+    const cmds = [licencjaCmd, panelCmd, instalacjaCmd, ...verify.commands, ...tickets.commands, ...legit.commands].map(x => x.toJSON());
     try {
       if (env.GUILD_ID) {
         const guild = await c.guilds.fetch(env.GUILD_ID);
