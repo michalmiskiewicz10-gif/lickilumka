@@ -1,0 +1,15 @@
+{
+  "name": "autorynek-licencje",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Bot Discord + serwer licencji do moda AutoRynek",
+  "scripts": {
+    "start": "node src/index.js",
+    "keys": "node gen-keys.js"
+  },
+  "engines": { "node": ">=20.12" },
+  "dependencies": {
+    "discord.js": "^14.22.1"
+  }
+}
