@@ -43,6 +43,11 @@ export function createTickets({ client, env, isAdmin, serverName }) {
     .setName('zgloszenia').setDescription('Wysyła na kanał panel systemu zgłoszeń (ticketów)')
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild);
 
+  // /zaproponuj_zamkniecie - bez setDefaultMemberPermissions, zeby mogl jej uzyc tez personel z TICKET_STAFF_ROLE_ID (uprawnienia sprawdza handler)
+  const proposeCmd = new SlashCommandBuilder()
+    .setName('zaproponuj_zamkniecie').setDescription('Proponuje zamknięcie tego zgłoszenia (gracz lub administracja potwierdza przyciskiem)')
+    .addStringOption(o => o.setName('powod').setDescription('Dlaczego proponujesz zamknięcie (opcjonalnie)').setMaxLength(300));
+
   function selectRow() {
     const select = new StringSelectMenuBuilder()
       .setCustomId('ticket:select').setPlaceholder('Wybierz kategorię ticketu...')
@@ -187,6 +192,51 @@ export function createTickets({ client, env, isAdmin, serverName }) {
       .catch(e => console.error('Wiadomosc w archiwum ticketu:', e.message));
   }
 
+  /** /zaproponuj_zamkniecie - personel proponuje zamkniecie ticketu; przyciski [Zamknij] / [Zostaw otwarte]. */
+  async function handlePropose(i) {
+    if (!isStaffMember(i)) return i.reply({ content: '❌ Nie masz uprawnień.', flags: EPHEMERAL });
+    const owner = ownerOf(i.channel);
+    if (!owner) {
+      return i.reply({
+        content: isArchived(i.channel) ? '🔒 To zgłoszenie jest już zamknięte.' : '❌ Tej komendy użyjesz tylko na kanale zgłoszenia (ticketu).',
+        flags: EPHEMERAL,
+      });
+    }
+    const reason = (i.options.getString('powod') || '').trim();
+    const embed = new EmbedBuilder()
+      .setColor(0xf5c542)
+      .setTitle('🔒 Propozycja zamknięcia zgłoszenia')
+      .setDescription([
+        `<@${i.user.id}> proponuje zamknięcie tego zgłoszenia.`,
+        reason ? `\n**Powód:** ${reason}` : '',
+        '\nJeśli sprawa jest załatwiona, kliknij **Zamknij**. Jeśli nie – **Zostaw otwarte**.',
+      ].join(''))
+      .setFooter({ text: serverName });
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('ticket:propyes').setLabel('Zamknij').setEmoji('🔒').setStyle(ButtonStyle.Danger),
+      new ButtonBuilder().setCustomId('ticket:propno').setLabel('Zostaw otwarte').setEmoji('📂').setStyle(ButtonStyle.Secondary),
+    );
+    return i.reply({
+      content: `<@${owner}>`, embeds: [embed], components: [row],
+      allowedMentions: { users: [owner] },
+    });
+  }
+
+  /** [Zostaw otwarte] - odrzucenie propozycji zamkniecia (gracz albo personel). */
+  async function handleKeepOpen(i) {
+    const owner = ownerOf(i.channel);
+    if (!owner) return i.reply({ content: '❌ To nie jest otwarte zgłoszenie.', flags: EPHEMERAL });
+    if (!(i.user.id === owner || isStaffMember(i))) {
+      return i.reply({ content: '❌ Nie masz uprawnień do tego zgłoszenia.', flags: EPHEMERAL });
+    }
+    const embed = new EmbedBuilder()
+      .setColor(0x57f287)
+      .setTitle('📂 Zgłoszenie zostaje otwarte')
+      .setDescription(`<@${i.user.id}> zdecydował, że zgłoszenie zostaje otwarte.`)
+      .setFooter({ text: serverName });
+    return i.update({ content: '', embeds: [embed], components: [], allowedMentions: { parse: [] } });
+  }
+
   /** Przycisk w kategorii "Usuniete": kasuje kanal calkowicie (tylko administracja). */
   async function handleDelete(i) {
     if (!isArchived(i.channel)) return i.reply({ content: '❌ Ten kanał nie jest zamkniętym zgłoszeniem.', flags: EPHEMERAL });
@@ -196,8 +246,9 @@ export function createTickets({ client, env, isAdmin, serverName }) {
   }
 
   return {
-    commands: [ticketCmd],
+    commands: [ticketCmd, proposeCmd],
     handleCommand: async i => {
+      if (i.commandName === 'zaproponuj_zamkniecie') return handlePropose(i);
       if (i.commandName !== 'zgloszenia') return;
       if (!isAdmin(i)) return i.reply({ content: '❌ Nie masz uprawnień.', flags: EPHEMERAL });
       // 2. proba: bez grafiki (np. brak uprawnienia "Dolaczanie plikow")
@@ -206,7 +257,8 @@ export function createTickets({ client, env, isAdmin, serverName }) {
     handleSelect,
     open,
     handleButton: i => {
-      if (i.customId === 'ticket:close') return handleClose(i);
+      if (i.customId === 'ticket:close' || i.customId === 'ticket:propyes') return handleClose(i);
+      if (i.customId === 'ticket:propno') return handleKeepOpen(i);
       if (i.customId === 'ticket:delete') return handleDelete(i);
       return null;
     },

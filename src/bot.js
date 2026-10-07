@@ -51,6 +51,16 @@ export function createBot({ store, env }) {
     return i.memberPermissions?.has(PermissionFlagsBits.ManageGuild) ?? false;
   }
 
+  // ---- uprawnienia do licencji: TYLKO ranga LICENSE_ROLE_ID (lub ID z LICENSE_USER_IDS); wlasciciel serwera jest zawsze wykluczony ----
+  const licenseRoleId = (env.LICENSE_ROLE_ID || '').trim();
+  const licenseUserIds = (env.LICENSE_USER_IDS || '').split(',').map(s => s.trim()).filter(Boolean);
+  function isLicenseAdmin(i) {
+    if (i.guild?.ownerId && i.guild.ownerId === i.user.id) return false;   // wlasciciel nie zarzadza licencjami
+    if (licenseUserIds.includes(i.user.id)) return true;
+    return !!licenseRoleId && !!i.member?.roles?.cache?.has(licenseRoleId);
+  }
+  const NO_LICENSE_PERM = '❌ Licencjami mogą zarządzać tylko osoby z rangą licencyjną (właściciel serwera też nie).';
+
   const verify = createVerify({ client, env, isAdmin, serverName });
   const tickets = createTickets({ client, env, isAdmin, serverName });
   const legit = createLegit({ store, env, isAdmin, serverName });
@@ -352,7 +362,6 @@ export function createBot({ store, env }) {
   const licencjaCmd = new SlashCommandBuilder()
     .setName('licencja')
     .setDescription('Tworzy jednorazowy kod licencyjny do moda')
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
     .addUserOption(o => o.setName('discord').setDescription('Użytkownik Discorda, który kupuje licencję').setRequired(true))
     .addStringOption(o => o.setName('jednostka').setDescription('Na jak długo').setRequired(true).addChoices(
       { name: 'Sekundy', value: 's' },
@@ -375,7 +384,7 @@ export function createBot({ store, env }) {
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild);
 
   async function handleCreate(i) {
-    if (!isAdmin(i)) return i.reply({ content: '❌ Nie masz uprawnień.', flags: EPHEMERAL });
+    if (!isLicenseAdmin(i)) return i.reply({ content: NO_LICENSE_PERM, flags: EPHEMERAL });
 
     const user = i.options.getUser('discord', true);
     const unit = i.options.getString('jednostka', true);
@@ -459,11 +468,10 @@ export function createBot({ store, env }) {
 
   const resetCmd = new SlashCommandBuilder()
     .setName('resethwid').setDescription('Resetuje HWID licencji - kod można wtedy użyć na innym komputerze')
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
     .addStringOption(o => o.setName('kod').setDescription('Kod licencji XXXX-XXXX-XXXX-XXXX').setRequired(true).setMaxLength(19));
 
   async function handleResetCmd(i) {
-    if (!isAdmin(i)) return i.reply({ content: '❌ Nie masz uprawnień.', flags: EPHEMERAL });
+    if (!isLicenseAdmin(i)) return i.reply({ content: NO_LICENSE_PERM, flags: EPHEMERAL });
     const key = i.options.getString('kod', true).trim().toUpperCase();
     const lic = store.get(key);
     if (!lic) return i.reply({ content: '❌ Nie ma takiej licencji w bazie.', flags: EPHEMERAL });
@@ -474,6 +482,40 @@ export function createBot({ store, env }) {
       content: `🔄 Zresetowano HWID licencji \`${key}\` (kupujący: <@${lic.discordId}>).\n`
         + 'Stary komputer przestanie działać z tym kodem (mod sprawdza licencję co jakiś czas), a kod można aktywować na nowym komputerze.',
       flags: EPHEMERAL,
+    });
+  }
+
+  // ================= usuwanie licencji po graczu (bez kodu) =================
+  const removeCmd = new SlashCommandBuilder()
+    .setName('usun_licencje').setDescription('Usuwa licencję gracza po jego koncie Discord – kod nie jest potrzebny')
+    .addUserOption(o => o.setName('gracz').setDescription('Gracz (konto Discord), któremu usuwasz licencję').setRequired(true))
+    .addStringOption(o => o.setName('mod').setDescription('Którego moda (pomiń, jeśli gracz ma tylko jedną licencję)')
+      .addChoices(...Object.entries(MODS).map(([value, m]) => ({ name: m.label, value }))));
+
+  async function handleRemoveCmd(i) {
+    if (!isLicenseAdmin(i)) return i.reply({ content: NO_LICENSE_PERM, flags: EPHEMERAL });
+    const user = i.options.getUser('gracz', true);
+    const modId = i.options.getString('mod') || '';
+
+    // tylko licencje, ktore jeszcze dzialaja (nie uniewaznione)
+    const found = store.byDiscord(user.id).filter(l => !l.revoked && (!modId || (l.mod || DEFAULT_MOD) === modId));
+    if (!found.length) {
+      return i.reply({ content: `ℹ️ <@${user.id}> nie ma żadnej aktywnej licencji${modId ? ` do moda ${MODS[modId].label}` : ''}.`, flags: EPHEMERAL, allowedMentions: { parse: [] } });
+    }
+    if (found.length > 1 && !modId) {
+      const list = found.map(l => `• ${(MODS[l.mod || DEFAULT_MOD] || MODS[DEFAULT_MOD]).label} – \`${l.key}\``).join('\n');
+      return i.reply({ content: `⚠️ <@${user.id}> ma kilka aktywnych licencji:\n${list}\nWybierz moda w parametrze **mod**.`, flags: EPHEMERAL, allowedMentions: { parse: [] } });
+    }
+
+    const lic = found[0];
+    lic.revoked = true;
+    lic.revokedAt = Date.now();
+    lic.removedBy = i.user.id;   // rekord zostaje w bazie (historia), ale mod odrzuca kod jak uniewazniony
+    store.put(lic);
+    await refreshMessage(lic);
+    return i.reply({
+      content: `🗑️ Usunięto licencję \`${lic.key}\` gracza <@${user.id}> (${(MODS[lic.mod || DEFAULT_MOD] || MODS[DEFAULT_MOD]).label}). Mod przestanie działać w ciągu kilku minut.`,
+      flags: EPHEMERAL, allowedMentions: { parse: [] },
     });
   }
 
@@ -548,8 +590,10 @@ export function createBot({ store, env }) {
     if (action === 'gw') return giveaway.handleButton(i);
     if (action === 'vote') return handleVote(i, arg);
 
-    // ponizej: tylko administracja
-    if (!isAdmin(i)) return i.reply({ content: '❌ Nie masz uprawnień.', flags: EPHEMERAL });
+    // ponizej: unieważnianie i reset HWID - tylko ranga licencyjna (nie wlasciciel); reszta - administracja
+    if (action === 'rev' || action === 'hwd') {
+      if (!isLicenseAdmin(i)) return i.reply({ content: NO_LICENSE_PERM, flags: EPHEMERAL });
+    } else if (!isAdmin(i)) return i.reply({ content: '❌ Nie masz uprawnień.', flags: EPHEMERAL });
     if (action === 'extall') return handleExtAllButton(i);
     const key = arg;
     const lic = store.get(key);
@@ -611,13 +655,14 @@ export function createBot({ store, env }) {
     try {
       if (i.isChatInputCommand()) {
         if (i.commandName === 'weryfikacja') await verify.handleCommand(i);
-        else if (i.commandName === 'zgloszenia') await tickets.handleCommand(i);
+        else if (i.commandName === 'zgloszenia' || i.commandName === 'zaproponuj_zamkniecie') await tickets.handleCommand(i);
         else if (i.commandName === 'licznik') await legit.handleCommand(i);
-        else if (i.commandName === 'media' || i.commandName === 'reset') await media.handleCommand(i);
+        else if (i.commandName === 'media' || i.commandName === 'reset' || i.commandName === 'odrzuc_podanie') await media.handleCommand(i);
         else if (i.commandName === 'konkurs' || i.commandName === 'konkurs_wylacz' || i.commandName === 'roll') await giveaway.handleCommand(i);
         else if (i.commandName === 'cennik') await shop.handleCommand(i);
         else if (i.commandName === 'regulamin') await regulamin.handleCommand(i);
         else if (i.commandName === 'resethwid') await handleResetCmd(i);
+        else if (i.commandName === 'usun_licencje') await handleRemoveCmd(i);
         else if (i.commandName === 'przedluz_wszystkie') await handleExtAllCmd(i);
         else if (i.commandName === 'licencja') await handleCreate(i);
         else if (i.commandName === 'panel') {
@@ -692,7 +737,7 @@ export function createBot({ store, env }) {
     console.log(`Bot zalogowany jako ${c.user.tag}`);
     giveaway.start();
     if (boost.roleId && env.GUILD_ID) c.guilds.fetch(env.GUILD_ID).then(g => boost.syncAll(g)).catch(() => {});
-    const cmds = [licencjaCmd, panelCmd, instalacjaCmd, resetCmd, extAllCmd, ...shop.commands, ...regulamin.commands, ...verify.commands, ...tickets.commands, ...legit.commands, ...media.commands, ...giveaway.commands].map(x => x.toJSON());
+    const cmds = [licencjaCmd, panelCmd, instalacjaCmd, resetCmd, removeCmd, extAllCmd, ...shop.commands, ...regulamin.commands, ...verify.commands, ...tickets.commands, ...legit.commands, ...media.commands, ...giveaway.commands].map(x => x.toJSON());
     try {
       if (env.GUILD_ID) {
         const guild = await c.guilds.fetch(env.GUILD_ID);

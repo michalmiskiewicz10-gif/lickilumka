@@ -42,6 +42,13 @@ export function createMedia({ client, store, env, isAdmin, serverName }) {
     .addSubcommand(s => s.setName('cooldown').setDescription('Zdejmuje blokadę ponownego podania na Media po odrzuceniu')
       .addUserOption(o => o.setName('gracz').setDescription('Gracz, któremu resetujesz cooldown').setRequired(true)));
 
+  // /odrzuc_podanie - opcjonalna alternatywa dla przycisku [Odrzuć] na podaniu
+  const rejectCmd = new SlashCommandBuilder()
+    .setName('odrzuc_podanie').setDescription('Odrzuca oczekujące podanie na Media (to samo co przycisk „Odrzuć”)')
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+    .addUserOption(o => o.setName('gracz').setDescription('Gracz, którego podanie odrzucasz').setRequired(true))
+    .addStringOption(o => o.setName('powod').setDescription('Powód odrzucenia (opcjonalnie) – gracz zobaczy go na PV').setMaxLength(500));
+
   async function handleReset(i) {
     if (!isAdmin(i)) return i.reply({ content: '❌ Nie masz uprawnień.', flags: EPHEMERAL });
     if (i.options.getSubcommand() !== 'cooldown') return;
@@ -356,25 +363,30 @@ export function createMedia({ client, store, env, isAdmin, serverName }) {
     return i.showModal(modal);
   }
 
-  async function handleModal(i) {
-    if (!i.customId.startsWith('mediarej:')) return;
-    if (!isAdmin(i)) return i.reply({ content: '❌ Nie masz uprawnień.', flags: EPHEMERAL });
-    const uid = i.customId.slice('mediarej:'.length);
+  /** Wspolna logika odrzucenia: modal z przycisku ORAZ komenda /odrzuc_podanie. */
+  async function rejectApplication(i, uid, reason) {
     const app = store.pendingMedia(uid);
-    if (!app) return i.reply({ content: 'To podanie zostało już rozpatrzone.', flags: EPHEMERAL });
+    if (!app) return i.reply({ content: 'To podanie zostało już rozpatrzone (albo gracz nie ma oczekującego podania).', flags: EPHEMERAL });
 
-    const reason = i.fields.getTextInputValue('powod').trim();
     const until = Date.now() + cooldownMs;
     app.status = 'rejected'; app.decidedBy = i.user.id; app.decidedAt = Date.now(); app.reason = reason || null;
     store.putMedia(app);
     store.setMediaCd(uid, until);
 
-    if (i.isFromMessage()) {
+    if (i.isModalSubmit?.() && i.isFromMessage()) {
       const embed = setStatus(EmbedBuilder.from(i.message.embeds[0]).setColor(0xed4245), `❌ Odrzucono przez <@${i.user.id}>`);
       if (reason) embed.addFields({ name: 'Powód', value: reason });
       await i.update({ embeds: [embed], components: [] });
     } else {
-      await i.reply({ content: '❌ Podanie odrzucone.', flags: EPHEMERAL });
+      // komenda: aktualizujemy wiadomosc z podaniem w kanale-tickecie (jesli jeszcze istnieje)
+      try {
+        const pch = await client.channels.fetch(app.channelId);
+        const pmsg = await pch.messages.fetch(app.id);
+        const embed = setStatus(EmbedBuilder.from(pmsg.embeds[0]).setColor(0xed4245), `❌ Odrzucono przez <@${i.user.id}>`);
+        if (reason) embed.addFields({ name: 'Powód', value: reason });
+        await pmsg.edit({ embeds: [embed], components: [] });
+      } catch { /* kanal juz usuniety - pomijamy */ }
+      await i.reply({ content: `❌ Podanie <@${uid}> odrzucone.`, flags: EPHEMERAL, allowedMentions: { parse: [] } });
     }
     deleteTicket(app, i.channel);
 
@@ -389,6 +401,19 @@ export function createMedia({ client, store, env, isAdmin, serverName }) {
     if (!sent) i.followUp({ content: '⚠️ Nie udało się wysłać gracza wiadomości o odrzuceniu (zablokowane PW). Cooldown i tak został ustawiony.', flags: EPHEMERAL }).catch(() => {});
   }
 
+  async function handleModal(i) {
+    if (!i.customId.startsWith('mediarej:')) return;
+    if (!isAdmin(i)) return i.reply({ content: '❌ Nie masz uprawnień.', flags: EPHEMERAL });
+    const uid = i.customId.slice('mediarej:'.length);
+    return rejectApplication(i, uid, i.fields.getTextInputValue('powod').trim());
+  }
+
+  async function handleRejectCmd(i) {
+    if (!isAdmin(i)) return i.reply({ content: '❌ Nie masz uprawnień.', flags: EPHEMERAL });
+    const user = i.options.getUser('gracz', true);
+    return rejectApplication(i, user.id, (i.options.getString('powod') || '').trim());
+  }
+
   async function handleButton(i) {
     const [, action, arg] = i.customId.split(':');
     if (action === 'apply') return startApply(i);
@@ -401,12 +426,13 @@ export function createMedia({ client, store, env, isAdmin, serverName }) {
   }
 
   return {
-    commands: [mediaCmd, resetCmd],
+    commands: [mediaCmd, resetCmd, rejectCmd],
     onMessage,
     handleButton,
     handleModal,
     handleCommand: async i => {
       if (i.commandName === 'reset') return handleReset(i);
+      if (i.commandName === 'odrzuc_podanie') return handleRejectCmd(i);
       if (i.commandName !== 'media') return;
       if (!isAdmin(i)) return i.reply({ content: '❌ Nie masz uprawnień.', flags: EPHEMERAL });
       return sendPanel(i, panelMessage());
