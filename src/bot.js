@@ -16,6 +16,7 @@ import { createShop } from './shop.js';
 import { createAntiInvite } from './antiinvite.js';
 import { createBoost } from './boost.js';
 import { createImageGuard } from './imageguard.js';
+import { createRegulamin } from './regulamin.js';
 import { MODS, DEFAULT_MOD } from './mods.js';
 import { findAsset } from './assets.js';
 
@@ -58,6 +59,7 @@ export function createBot({ store, env }) {
   const antiInvite = createAntiInvite({ client, env, serverName });
   const boost = createBoost({ client, env, serverName });
   const imageGuard = createImageGuard({ env });
+  const regulamin = createRegulamin({ env, isAdmin, serverName });
   const giveaway = createGiveaway({ client, store, isAdmin });
 
   // ================= wiadomosc o licencji =================
@@ -614,6 +616,7 @@ export function createBot({ store, env }) {
         else if (i.commandName === 'media' || i.commandName === 'reset') await media.handleCommand(i);
         else if (i.commandName === 'konkurs' || i.commandName === 'konkurs_wylacz' || i.commandName === 'roll') await giveaway.handleCommand(i);
         else if (i.commandName === 'cennik') await shop.handleCommand(i);
+        else if (i.commandName === 'regulamin') await regulamin.handleCommand(i);
         else if (i.commandName === 'resethwid') await handleResetCmd(i);
         else if (i.commandName === 'przedluz_wszystkie') await handleExtAllCmd(i);
         else if (i.commandName === 'licencja') await handleCreate(i);
@@ -689,7 +692,7 @@ export function createBot({ store, env }) {
     console.log(`Bot zalogowany jako ${c.user.tag}`);
     giveaway.start();
     if (boost.roleId && env.GUILD_ID) c.guilds.fetch(env.GUILD_ID).then(g => boost.syncAll(g)).catch(() => {});
-    const cmds = [licencjaCmd, panelCmd, instalacjaCmd, resetCmd, extAllCmd, ...shop.commands, ...verify.commands, ...tickets.commands, ...legit.commands, ...media.commands, ...giveaway.commands].map(x => x.toJSON());
+    const cmds = [licencjaCmd, panelCmd, instalacjaCmd, resetCmd, extAllCmd, ...shop.commands, ...regulamin.commands, ...verify.commands, ...tickets.commands, ...legit.commands, ...media.commands, ...giveaway.commands].map(x => x.toJSON());
     try {
       if (env.GUILD_ID) {
         const guild = await c.guilds.fetch(env.GUILD_ID);
