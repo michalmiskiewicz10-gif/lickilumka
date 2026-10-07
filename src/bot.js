@@ -10,6 +10,7 @@ import { genKey, parseDuration, parseText, isExpired, expiryText, sendPanel } fr
 import { createVerify } from './verify.js';
 import { createTickets } from './tickets.js';
 import { createLegit } from './legit.js';
+import { createPhotoChannel } from './photochannel.js';
 import { createMedia } from './media.js';
 import { createGiveaway } from './giveaway.js';
 import { createShop } from './shop.js';
@@ -39,7 +40,7 @@ export function createBot({ store, env }) {
   intents.push(GatewayIntentBits.GuildMessages);
   // tresc wiadomosci (uprzywilejowane): propozycje + antyreklama (wylaczysz ja: ANTI_INVITE=0)
   const antiInviteOn = !['0', 'off', 'false', 'nie'].includes(String(env.ANTI_INVITE || '').toLowerCase());
-  if (env.PROPOSALS_CHANNEL_ID || antiInviteOn || env.IMAGE_CHANNEL_IDS || env.IMAGE_CHANNEL_ID) intents.push(GatewayIntentBits.MessageContent);
+  if (env.PROPOSALS_CHANNEL_ID || env.PHOTO_CHANNEL_ID || antiInviteOn || env.IMAGE_CHANNEL_IDS || env.IMAGE_CHANNEL_ID) intents.push(GatewayIntentBits.MessageContent);
   // wiadomosci prywatne (podania na Media) - tresc PV nie wymaga uprzywilejowanego intentu
   intents.push(GatewayIntentBits.DirectMessages);
   const client = new Client({ intents, partials: [Partials.Channel] });
@@ -68,6 +69,7 @@ export function createBot({ store, env }) {
   const shop = createShop({ client, env, isAdmin, serverName, tickets });
   const antiInvite = createAntiInvite({ client, env, serverName });
   const boost = createBoost({ client, env, serverName });
+  const photoChannel = createPhotoChannel({ env, serverName });
   const imageGuard = createImageGuard({ env });
   const regulamin = createRegulamin({ env, isAdmin, serverName });
   const giveaway = createGiveaway({ client, store, isAdmin });
@@ -350,6 +352,7 @@ export function createBot({ store, env }) {
   client.on(Events.MessageCreate, async message => {
     if (await boost.onMessage(message).catch(e => (console.error('Boost:', e), false))) return;
     if (await antiInvite.onMessage(message).catch(e => (console.error('Antyreklama:', e), false))) return;
+    if (await photoChannel.onMessage(message).catch(e => (console.error('Kanal zdjec:', e), false))) return;
     if (await imageGuard.check(message).catch(e => (console.error('Blokada zdjec:', e), false))) return;
     legit.onMessage(message);
     media.onMessage(message).catch(e => console.error('Media (PV):', e));
