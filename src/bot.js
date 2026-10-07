@@ -51,15 +51,15 @@ export function createBot({ store, env }) {
     return i.memberPermissions?.has(PermissionFlagsBits.ManageGuild) ?? false;
   }
 
-  // ---- uprawnienia do licencji: TYLKO ranga LICENSE_ROLE_ID (lub ID z LICENSE_USER_IDS); wlasciciel serwera jest zawsze wykluczony ----
+  // ---- uprawnienia do licencji: wlasciciel serwera (ten, kto stworzyl Discorda) LUB ranga LICENSE_ROLE_ID (lub ID z LICENSE_USER_IDS) ----
   const licenseRoleId = (env.LICENSE_ROLE_ID || '').trim();
   const licenseUserIds = (env.LICENSE_USER_IDS || '').split(',').map(s => s.trim()).filter(Boolean);
   function isLicenseAdmin(i) {
-    if (i.guild?.ownerId && i.guild.ownerId === i.user.id) return false;   // wlasciciel nie zarzadza licencjami
+    if (i.guild?.ownerId && i.guild.ownerId === i.user.id) return true;    // wlasciciel serwera
     if (licenseUserIds.includes(i.user.id)) return true;
     return !!licenseRoleId && !!i.member?.roles?.cache?.has(licenseRoleId);
   }
-  const NO_LICENSE_PERM = '❌ Licencjami mogą zarządzać tylko osoby z rangą licencyjną (właściciel serwera też nie).';
+  const NO_LICENSE_PERM = '❌ Licencjami może zarządzać tylko właściciel serwera lub osoba ze specjalną rangą licencyjną.';
 
   const verify = createVerify({ client, env, isAdmin, serverName });
   const tickets = createTickets({ client, env, isAdmin, serverName });
