@@ -541,7 +541,7 @@ export function createBot({ store, env }) {
   }
 
   async function handleExtAllCmd(i) {
-    if (!isAdmin(i)) return i.reply({ content: '❌ Nie masz uprawnień.', flags: EPHEMERAL });
+    if (!isLicenseAdmin(i)) return i.reply({ content: NO_LICENSE_PERM, flags: EPHEMERAL });
     const days = i.options.getInteger('dni', true);
     const modId = i.options.getString('mod') || '';
     const { todo, perm, dead } = extAllScan(modId);
@@ -593,8 +593,8 @@ export function createBot({ store, env }) {
     if (action === 'gw') return giveaway.handleButton(i);
     if (action === 'vote') return handleVote(i, arg);
 
-    // ponizej: unieważnianie i reset HWID - tylko ranga licencyjna (nie wlasciciel); reszta - administracja
-    if (action === 'rev' || action === 'hwd') {
+    // ponizej: unieważnianie, reset HWID i przedluzanie - tylko ranga licencyjna (nie wlasciciel); reszta - administracja
+    if (action === 'rev' || action === 'hwd' || action === 'ext' || action === 'extall') {
       if (!isLicenseAdmin(i)) return i.reply({ content: NO_LICENSE_PERM, flags: EPHEMERAL });
     } else if (!isAdmin(i)) return i.reply({ content: '❌ Nie masz uprawnień.', flags: EPHEMERAL });
     if (action === 'extall') return handleExtAllButton(i);
@@ -632,7 +632,7 @@ export function createBot({ store, env }) {
 
   async function handleModal(i) {
     if (!i.customId.startsWith('extm:')) return;
-    if (!isAdmin(i)) return i.reply({ content: '❌ Nie masz uprawnień.', flags: EPHEMERAL });
+    if (!isLicenseAdmin(i)) return i.reply({ content: NO_LICENSE_PERM, flags: EPHEMERAL });
     const key = i.customId.slice(5);
     const lic = store.get(key);
     if (!lic || lic.revoked) return i.reply({ content: '❌ Licencja nie istnieje albo jest unieważniona.', flags: EPHEMERAL });
