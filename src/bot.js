@@ -13,6 +13,8 @@ import { createLegit } from './legit.js';
 import { createMedia } from './media.js';
 import { createGiveaway } from './giveaway.js';
 import { createShop } from './shop.js';
+import { createAntiInvite } from './antiinvite.js';
+import { createBoost } from './boost.js';
 import { MODS, DEFAULT_MOD } from './mods.js';
 import { findAsset } from './assets.js';
 
@@ -30,11 +32,12 @@ export function createBot({ store, env }) {
   const serverName = env.SERVER_NAME || 'LumaMC';
   const intents = [GatewayIntentBits.Guilds];
   // GuildMembers (uprzywilejowane) - tylko dla powitan
-  if (env.WELCOME_CHANNEL_ID || env.UNVERIFIED_ROLE_ID) intents.push(GatewayIntentBits.GuildMembers);
-  // wiadomosci na kanalach propozycji / legitchecka
-  if (env.PROPOSALS_CHANNEL_ID || env.LEGITCHECK_CHANNEL_ID) intents.push(GatewayIntentBits.GuildMessages);
-  // tresc wiadomosci (uprzywilejowane) jest potrzebna tylko do propozycji
-  if (env.PROPOSALS_CHANNEL_ID) intents.push(GatewayIntentBits.MessageContent);
+  if (env.WELCOME_CHANNEL_ID || env.UNVERIFIED_ROLE_ID || env.BOOST_ROLE_ID) intents.push(GatewayIntentBits.GuildMembers);
+  // wiadomosci na kanalach (propozycje, legitcheck, antyreklama, boosty)
+  intents.push(GatewayIntentBits.GuildMessages);
+  // tresc wiadomosci (uprzywilejowane): propozycje + antyreklama (wylaczysz ja: ANTI_INVITE=0)
+  const antiInviteOn = !['0', 'off', 'false', 'nie'].includes(String(env.ANTI_INVITE || '').toLowerCase());
+  if (env.PROPOSALS_CHANNEL_ID || antiInviteOn) intents.push(GatewayIntentBits.MessageContent);
   // wiadomosci prywatne (podania na Media) - tresc PV nie wymaga uprzywilejowanego intentu
   intents.push(GatewayIntentBits.DirectMessages);
   const client = new Client({ intents, partials: [Partials.Channel] });
@@ -51,6 +54,8 @@ export function createBot({ store, env }) {
   const legit = createLegit({ store, env, isAdmin, serverName });
   const media = createMedia({ client, store, env, isAdmin, serverName });
   const shop = createShop({ client, env, isAdmin, serverName, tickets });
+  const antiInvite = createAntiInvite({ client, env, serverName });
+  const boost = createBoost({ client, env, serverName });
   const giveaway = createGiveaway({ client, store, isAdmin });
 
   // ================= wiadomosc o licencji =================
@@ -329,6 +334,8 @@ export function createBot({ store, env }) {
   }
 
   client.on(Events.MessageCreate, async message => {
+    if (await boost.onMessage(message).catch(e => (console.error('Boost:', e), false))) return;
+    if (await antiInvite.onMessage(message).catch(e => (console.error('Antyreklama:', e), false))) return;
     legit.onMessage(message);
     media.onMessage(message).catch(e => console.error('Media (PV):', e));
     if (!env.PROPOSALS_CHANNEL_ID || message.channelId !== env.PROPOSALS_CHANNEL_ID) return;
@@ -465,6 +472,59 @@ export function createBot({ store, env }) {
     });
   }
 
+  // ================= przedluzanie wszystkich aktywnych licencji =================
+  const extAllCmd = new SlashCommandBuilder()
+    .setName('przedluz_wszystkie').setDescription('Przedłuża KAŻDĄ aktywną licencję o podaną liczbę dni')
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+    .addIntegerOption(o => o.setName('dni').setDescription('O ile dni przedłużyć').setRequired(true).setMinValue(1).setMaxValue(3650))
+    .addStringOption(o => o.setName('mod').setDescription('Tylko licencje tego moda (domyślnie: wszystkie mody)')
+      .addChoices(...Object.entries(MODS).map(([value, m]) => ({ name: m.label, value }))));
+
+  /** Aktywna = nie uniewazniona i nie wygasla. Permanentne pomijamy (nie ma czego przedluzac). */
+  function extAllScan(modId) {
+    const all = Object.values(store.data.licenses).filter(l => !modId || (l.mod || DEFAULT_MOD) === modId);
+    return {
+      todo: all.filter(l => !l.revoked && l.expiresAt != null && !isExpired(l)),
+      perm: all.filter(l => !l.revoked && l.expiresAt == null).length,
+      dead: all.filter(l => l.revoked || (l.expiresAt != null && isExpired(l))).length,
+    };
+  }
+
+  async function handleExtAllCmd(i) {
+    if (!isAdmin(i)) return i.reply({ content: '❌ Nie masz uprawnień.', flags: EPHEMERAL });
+    const days = i.options.getInteger('dni', true);
+    const modId = i.options.getString('mod') || '';
+    const { todo, perm, dead } = extAllScan(modId);
+    if (!todo.length) {
+      return i.reply({ content: `ℹ️ Brak aktywnych licencji do przedłużenia (permanentne: ${perm}, wygasłe/unieważnione: ${dead}).`, flags: EPHEMERAL });
+    }
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId(`extall:ok:${days}:${modId || '-'}`).setLabel(`Przedłuż ${todo.length} licencji o ${days} dni`).setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('extall:no:0:-').setLabel('Anuluj').setStyle(ButtonStyle.Secondary),
+    );
+    return i.reply({
+      content: `⚠️ **Potwierdź akcję masową**\nZostanie przedłużonych **${todo.length}** aktywnych licencji o **${days} dni**.\n`
+        + `Pomijam: permanentne (${perm}) oraz wygasłe/unieważnione (${dead}).`,
+      components: [row], flags: EPHEMERAL,
+    });
+  }
+
+  async function handleExtAllButton(i) {
+    const [, decision, daysStr, modArg] = i.customId.split(':');
+    if (decision !== 'ok') return i.update({ content: '🚫 Anulowano – nic nie zmieniono.', components: [] });
+    const days = parseInt(daysStr, 10);
+    const { todo } = extAllScan(modArg === '-' ? '' : modArg);   // liczymy ponownie - stan mogl sie zmienic
+    if (!Number.isInteger(days) || days < 1 || !todo.length) return i.update({ content: 'ℹ️ Nie ma już czego przedłużać.', components: [] });
+
+    const add = days * 86_400_000;
+    for (const lic of todo) lic.expiresAt += add;
+    store.save();   // jeden zapis dla wszystkich licencji
+    await i.update({ content: `🟢 Przedłużono **${todo.length}** aktywnych licencji o **${days} dni**. Wiadomości z licencjami odświeżą się w tle.`, components: [] });
+
+    (async () => { for (const lic of todo) { await refreshMessage(lic); await new Promise(r => setTimeout(r, 400)); } })()
+      .catch(e => console.error('Przedluz wszystkie - odswiezanie:', e.message));
+  }
+
   // ================= przyciski =================
   async function handleButton(i) {
     const [action, arg] = i.customId.split(':');
@@ -485,6 +545,7 @@ export function createBot({ store, env }) {
 
     // ponizej: tylko administracja
     if (!isAdmin(i)) return i.reply({ content: '❌ Nie masz uprawnień.', flags: EPHEMERAL });
+    if (action === 'extall') return handleExtAllButton(i);
     const key = arg;
     const lic = store.get(key);
     if (!lic) return i.reply({ content: '❌ Nie ma takiej licencji w bazie.', flags: EPHEMERAL });
@@ -551,6 +612,7 @@ export function createBot({ store, env }) {
         else if (i.commandName === 'konkurs' || i.commandName === 'konkurs_wylacz' || i.commandName === 'roll') await giveaway.handleCommand(i);
         else if (i.commandName === 'cennik') await shop.handleCommand(i);
         else if (i.commandName === 'resethwid') await handleResetCmd(i);
+        else if (i.commandName === 'przedluz_wszystkie') await handleExtAllCmd(i);
         else if (i.commandName === 'licencja') await handleCreate(i);
         else if (i.commandName === 'panel') {
           if (!isAdmin(i)) return i.reply({ content: '❌ Nie masz uprawnień.', flags: EPHEMERAL });
@@ -611,10 +673,13 @@ export function createBot({ store, env }) {
     } catch (e) { console.error('Powitanie nie wyszlo:', e.message); }
   });
 
+  client.on(Events.GuildMemberUpdate, (_old, member) => { boost.syncMember(member).catch(() => {}); });
+
   client.once(Events.ClientReady, async c => {
     console.log(`Bot zalogowany jako ${c.user.tag}`);
     giveaway.start();
-    const cmds = [licencjaCmd, panelCmd, instalacjaCmd, resetCmd, ...shop.commands, ...verify.commands, ...tickets.commands, ...legit.commands, ...media.commands, ...giveaway.commands].map(x => x.toJSON());
+    if (boost.roleId && env.GUILD_ID) c.guilds.fetch(env.GUILD_ID).then(g => boost.syncAll(g)).catch(() => {});
+    const cmds = [licencjaCmd, panelCmd, instalacjaCmd, resetCmd, extAllCmd, ...shop.commands, ...verify.commands, ...tickets.commands, ...legit.commands, ...media.commands, ...giveaway.commands].map(x => x.toJSON());
     try {
       if (env.GUILD_ID) {
         const guild = await c.guilds.fetch(env.GUILD_ID);

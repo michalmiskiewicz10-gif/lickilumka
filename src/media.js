@@ -78,7 +78,7 @@ export function createMedia({ client, store, env, isAdmin, serverName }) {
   // ================= pytania na PV =================
   const qEmbed = (n, title, text) => new EmbedBuilder()
     .setColor(0x5865f2)
-    .setTitle(`📝 Pytanie ${n}/3 – ${title}`)
+    .setTitle(`📝 Pytanie ${n}/4 – ${title}`)
     .setDescription(text)
     .setFooter({ text: `${serverName} • Podanie na Media` });
 
@@ -90,7 +90,15 @@ export function createMedia({ client, store, env, isAdmin, serverName }) {
       new ButtonBuilder().setCustomId('media:prem:no').setLabel('Nie').setEmoji('❌').setStyle(ButtonStyle.Danger),
     )],
   });
-  const q3 = () => ({ embeds: [qEmbed(3, 'Konto YouTube / TikTok', 'Podaj **nazwę swojego konta na YouTube lub TikToku** (może być też link do profilu).')] });
+  const PLAT = { tt: { name: 'TikTok', emoji: '🎵' }, yt: { name: 'YouTube', emoji: '🎥' } };
+  const q3 = () => ({
+    embeds: [qEmbed(3, 'Platforma', 'Na jakiej platformie tworzysz treści? Kliknij przycisk poniżej (możesz też napisać „tiktok” albo „youtube”).')],
+    components: [new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('media:plat:tt').setLabel('TikTok').setEmoji('🎵').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('media:plat:yt').setLabel('YouTube').setEmoji('🎥').setStyle(ButtonStyle.Danger),
+    )],
+  });
+  const q4 = plat => ({ embeds: [qEmbed(4, `Konto ${PLAT[plat].name}`, `Podaj **nazwę swojego konta na ${PLAT[plat].name}** (może być też link do profilu).`)] });
 
   function summary(data) {
     const embed = new EmbedBuilder()
@@ -100,7 +108,8 @@ export function createMedia({ client, store, env, isAdmin, serverName }) {
       .addFields(
         { name: 'Nick z Minecrafta', value: `\`${data.nick}\``, inline: true },
         { name: 'Konto premium', value: data.premium ? '✅ Tak' : '❌ Nie', inline: true },
-        { name: 'Konto YouTube / TikTok', value: data.acct },
+        { name: 'Platforma', value: `${PLAT[data.platform].emoji} ${PLAT[data.platform].name}`, inline: true },
+        { name: `Konto ${PLAT[data.platform].name}`, value: data.acct },
       );
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId('media:send').setLabel('Wyślij apelację').setEmoji('📨').setStyle(ButtonStyle.Success),
@@ -160,8 +169,16 @@ export function createMedia({ client, store, env, isAdmin, serverName }) {
       if (['tak', 't', 'yes', 'y'].includes(t)) s.data.premium = true;
       else if (['nie', 'n', 'no'].includes(t)) s.data.premium = false;
       else return dm('Kliknij jeden z przycisków **Tak** / **Nie** (albo napisz „tak” lub „nie”).');
-      s.step = 'acct';
+      s.step = 'platform';
       return dm(q3());
+    }
+    if (s.step === 'platform') {
+      const t = text.toLowerCase().replace(/\s+/g, '');
+      if (['tiktok', 'tt', 'tik tok'.replace(' ', '')].includes(t)) s.data.platform = 'tt';
+      else if (['youtube', 'yt', 'you tube'.replace(' ', '')].includes(t)) s.data.platform = 'yt';
+      else return dm('Kliknij jeden z przycisków **TikTok** / **YouTube** (albo napisz „tiktok” lub „youtube”).');
+      s.step = 'acct';
+      return dm(q4(s.data.platform));
     }
     if (s.step === 'acct') {
       if (!text) return dm('❌ Napisz nazwę konta (albo link do profilu) jako zwykłą wiadomość tekstową.');
@@ -176,9 +193,19 @@ export function createMedia({ client, store, env, isAdmin, serverName }) {
     if (!s || s.step !== 'premium') {
       return i.update({ content: '⌛ Ta sesja wygasła. Kliknij **Aplikuj na Media** na serwerze jeszcze raz.', embeds: [], components: [] });
     }
-    s.data.premium = yes; s.step = 'acct'; s.exp = Date.now() + SESSION_TTL;
+    s.data.premium = yes; s.step = 'platform'; s.exp = Date.now() + SESSION_TTL;
     await i.update({ embeds: [qEmbed(2, 'Konto premium', `Twoja odpowiedź: **${yes ? 'Tak' : 'Nie'}**`)], components: [] });
     await i.user.send(q3()).catch(() => {});
+  }
+
+  async function platformButton(i, plat) {
+    const s = sessions.get(i.user.id);
+    if (!s || s.step !== 'platform' || !PLAT[plat]) {
+      return i.update({ content: '⌛ Ta sesja wygasła. Kliknij **Aplikuj na Media** na serwerze jeszcze raz.', embeds: [], components: [] });
+    }
+    s.data.platform = plat; s.step = 'acct'; s.exp = Date.now() + SESSION_TTL;
+    await i.update({ embeds: [qEmbed(3, 'Platforma', `Twoja odpowiedź: **${PLAT[plat].emoji} ${PLAT[plat].name}**`)], components: [] });
+    await i.user.send(q4(plat)).catch(() => {});
   }
 
   async function cancelApplication(i) {
@@ -199,7 +226,7 @@ export function createMedia({ client, store, env, isAdmin, serverName }) {
     const block = blocker(uid);
     if (block) { sessions.delete(uid); return i.update({ content: block, embeds: [], components: [] }); }
 
-    const { nick, premium, acct } = s.data;
+    const { nick, premium, acct, platform } = s.data;
     const embed = new EmbedBuilder()
       .setColor(0xf5c542)
       .setTitle('📸 Nowe podanie – Media')
@@ -208,7 +235,8 @@ export function createMedia({ client, store, env, isAdmin, serverName }) {
         { name: 'Gracz Discord', value: `<@${uid}> (\`${i.user.username}\`)` },
         { name: 'Nick z Minecrafta', value: `\`${nick}\``, inline: true },
         { name: 'Konto premium', value: premium ? '✅ Tak' : '❌ Nie', inline: true },
-        { name: 'Konto YouTube / TikTok', value: acct },
+        { name: 'Platforma', value: `${PLAT[platform].emoji} ${PLAT[platform].name}`, inline: true },
+        { name: `Konto ${PLAT[platform].name}`, value: acct },
         { name: 'Status', value: '🟡 Oczekuje na decyzję' },
       )
       .setTimestamp();
@@ -241,7 +269,7 @@ export function createMedia({ client, store, env, isAdmin, serverName }) {
       if (ch) ch.delete('Nieudane podanie Media').catch(() => {});
       return i.reply({ content: '❌ Nie udało się wysłać podania do administracji (sprawdź `MEDIA_CATEGORY_ID` i uprawnienia bota). Spróbuj za chwilę albo napisz do administracji.', flags: EPHEMERAL });
     }
-    store.putMedia({ id: msg.id, channelId: ch.id, userId: uid, nick, premium, acct, status: 'pending', createdAt: Date.now() });
+    store.putMedia({ id: msg.id, channelId: ch.id, userId: uid, nick, premium, acct, platform, status: 'pending', createdAt: Date.now() });
     sessions.delete(uid);
 
     return i.update({
@@ -300,7 +328,7 @@ export function createMedia({ client, store, env, isAdmin, serverName }) {
     if (!store.pendingMedia(uid)) return i.reply({ content: 'To podanie zostało już rozpatrzone.', flags: EPHEMERAL });
     const modal = new ModalBuilder().setCustomId(`mediarej:${uid}`).setTitle('Odrzucenie podania – Media').addComponents(
       new ActionRowBuilder().addComponents(
-        new TextInputBuilder().setCustomId('powod').setLabel('Powód odrzucenia (opcjonalnie, zobaczy go gracz)')
+        new TextInputBuilder().setCustomId('powod').setPlaceholder('Gracz zobaczy ten powód w wiadomości prywatnej').setLabel('Powód odrzucenia (opcjonalnie)')
           .setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(500),
       ),
     );
@@ -344,6 +372,7 @@ export function createMedia({ client, store, env, isAdmin, serverName }) {
     const [, action, arg] = i.customId.split(':');
     if (action === 'apply') return startApply(i);
     if (action === 'prem') return premiumButton(i, arg === 'yes');
+    if (action === 'plat') return platformButton(i, arg);
     if (action === 'send') return sendApplication(i);
     if (action === 'cancel') return cancelApplication(i);
     if (action === 'acc') return accept(i, arg);

@@ -1,6 +1,7 @@
 import {
-  ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, MessageFlags,
-  PermissionFlagsBits, SlashCommandBuilder, StringSelectMenuBuilder, StringSelectMenuOptionBuilder,
+  ActionRowBuilder, ButtonBuilder, ButtonStyle, ContainerBuilder, EmbedBuilder, MessageFlags,
+  PermissionFlagsBits, SectionBuilder, SeparatorBuilder, SeparatorSpacingSize, SlashCommandBuilder,
+  StringSelectMenuBuilder, StringSelectMenuOptionBuilder, TextDisplayBuilder,
 } from 'discord.js';
 
 const EPHEMERAL = MessageFlags.Ephemeral;
@@ -20,7 +21,7 @@ const OFFERS = {
       ['Lifetime', '100,00 zł'],
     ],
     addons: [
-      { name: 'Reset HWID', price: '10,00 zł', info: 'wyjasnij' },
+      { name: 'Reset HWID', price: '5,00 zł', info: true },
     ],
     payments: [['BLIK'], ['PayPal'], ['Paysafecard', 'prowizja +10,00 zł']],
   },
@@ -56,47 +57,48 @@ export function createShop({ client, env, isAdmin, serverName, tickets }) {
     return { embeds: [embed], components: [selectRow()] };
   }
 
+  /**
+   * Oferta jako kontener (komponenty V2): tekst + separatory, a przy addonie przycisk "Co to?" PO PRAWEJ stronie linii
+   * oraz zielony przycisk ZAKUP na dole. Wiadomosci V2 nie moga miec embedow ani zwyklego `content`.
+   */
   function offerMessage(id) {
     const o = OFFERS[id];
-    const embed = new EmbedBuilder()
-      .setColor(0xf5c542)
-      .setDescription([
-        `## 💣 ${o.title}`,
-        `**${o.subtitle}**`,
-        '',
-        '▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬',
-        '### 💳 CENA',
-        ...o.prices.map(([n, p]) => `> ${n} — **${p}**`),
-        '',
-        '▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬',
-        '### ➕ ADDONS',
-        ...o.addons.map(a => `> ${a.name} — **${a.price}**`),
-        '',
-        '▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬',
-        '### 💸 METODY PŁATNOŚCI',
-        ...o.payments.map(([n, note]) => `> **${n}**${note ? ` *(${note})*` : ''}`),
-        '',
-        '▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬',
-        '*Kliknij **Zakup**, aby otworzyć zgłoszenie zakupu.*',
-      ].join('\n'));
+    const text = c => new TextDisplayBuilder().setContent(c);
+    const sep = () => new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small);
 
-    const rows = [];
-    if (o.addons.some(a => a.info)) {
-      rows.push(new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId('shop:hwidinfo').setLabel('Co to Reset HWID?').setStyle(ButtonStyle.Secondary),
-      ));
+    const box = new ContainerBuilder().setAccentColor(0xf5c542)
+      .addTextDisplayComponents(text(`## ${o.emoji} ${o.title}\n**${o.subtitle}**`))
+      .addSeparatorComponents(sep())
+      .addTextDisplayComponents(text(['### 💳 CENA', ...o.prices.map(([n, p]) => `> ${n} — **${p}**`)].join('\n')))
+      .addSeparatorComponents(sep())
+      .addTextDisplayComponents(text('### ➕ ADDONS'));
+
+    for (const a of o.addons) {
+      const line = text(`> ${a.name} — **${a.price}**`);
+      if (a.info) {
+        box.addSectionComponents(new SectionBuilder().addTextDisplayComponents(line)
+          .setButtonAccessory(new ButtonBuilder().setCustomId('shop:hwidinfo').setLabel('Co to?').setStyle(ButtonStyle.Secondary)));
+      } else {
+        box.addTextDisplayComponents(line);
+      }
     }
-    rows.push(new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId(`shop:buy:${id}`).setLabel('ZAKUP').setStyle(ButtonStyle.Success),
-    ));
-    return { embeds: [embed], components: rows };
+
+    box.addSeparatorComponents(sep())
+      .addTextDisplayComponents(text(['### 💸 METODY PŁATNOŚCI', ...o.payments.map(([n, note]) => `> **${n}**${note ? ` *(${note})*` : ''}`)].join('\n')))
+      .addSeparatorComponents(sep())
+      .addTextDisplayComponents(text('*Kliknij **Zakup**, aby otworzyć zgłoszenie zakupu.*'))
+      .addActionRowComponents(new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(`shop:buy:${id}`).setLabel('ZAKUP').setStyle(ButtonStyle.Success),
+      ));
+
+    return { components: [box], flags: MessageFlags.IsComponentsV2 | EPHEMERAL };
   }
 
   async function handleSelect(i) {
     const id = i.values[0];
     if (!OFFERS[id]) return i.reply({ content: '❌ Ta oferta nie jest już dostępna.', flags: EPHEMERAL });
     i.message.edit({ components: [selectRow()] }).catch(() => {});   // zerujemy zaznaczenie na panelu
-    return i.reply({ ...offerMessage(id), flags: EPHEMERAL });
+    return i.reply(offerMessage(id));
   }
 
   async function handleButton(i) {
