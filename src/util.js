@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { MessageFlags } from 'discord.js';
 
 // bez O/0/I/1, zeby kod dalo sie przepisac bez pomylek
 const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -56,4 +57,22 @@ export function expiryText(lic) {
   if (lic.expiresAt == null) return '♾️ Nigdy (permanentna)';
   const s = Math.floor(lic.expiresAt / 1000);
   return `<t:${s}:F>\n(<t:${s}:R>)`;
+}
+
+/**
+ * Wysyla panel jako ZWYKLA wiadomosc bota na kanale (bez naglowka "X uzyl /komenda"),
+ * a osobie, ktora uzyla komendy, odpowiada tylko prywatnym potwierdzeniem.
+ * `payloads` - jeden payload albo kilka (kolejne sa proba awaryjna, np. bez grafiki).
+ */
+export async function sendPanel(i, ...payloads) {
+  const EPH = MessageFlags.Ephemeral;
+  if (!i.channel) return i.reply({ content: '❌ Nie widzę tego kanału. Sprawdź uprawnienia bota.', flags: EPH });
+  let lastErr;
+  for (const payload of payloads) {
+    try {
+      await i.channel.send(payload);
+      return i.reply({ content: '✅ Panel wysłany.', flags: EPH });
+    } catch (e) { lastErr = e; console.error('Wysylanie panelu:', e.message); }
+  }
+  return i.reply({ content: `❌ Nie udało się wysłać panelu: ${lastErr?.message || 'nieznany błąd'}\n(Bot musi widzieć ten kanał i mieć „Wysyłanie wiadomości”, „Osadzanie linków”, „Dołączanie plików”.)`, flags: EPH });
 }

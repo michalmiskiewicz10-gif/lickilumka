@@ -1,3 +1,4 @@
+import { sendPanel } from './util.js';
 import {
   ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, EmbedBuilder, MessageFlags, ModalBuilder,
   PermissionFlagsBits, PermissionFlagsBits as P, SlashCommandBuilder, TextInputBuilder, TextInputStyle,
@@ -23,7 +24,7 @@ export function createMedia({ client, store, env, isAdmin, serverName }) {
   const categoryId = env.MEDIA_CATEGORY_ID || env.TICKET_CATEGORY_MEDIA || undefined;   // folder na tickety z podaniami
   const staffRole = env.TICKET_STAFF_ROLE_ID;
   const adminIds = (env.ADMIN_IDS || '').split(',').map(x => x.trim()).filter(Boolean);
-  const cooldownDays = parseInt(env.MEDIA_COOLDOWN_DAYS || '7', 10) || 7;
+  const cooldownDays = parseInt(env.MEDIA_COOLDOWN_DAYS || '3', 10) || 3;
   const cooldownMs = cooldownDays * DAY;
   const sessions = new Map();   // userId -> { step, data, exp }
   setInterval(() => {
@@ -34,6 +35,26 @@ export function createMedia({ client, store, env, isAdmin, serverName }) {
   const mediaCmd = new SlashCommandBuilder()
     .setName('media').setDescription('Wysyła na kanał panel rekrutacji do ekipy Media')
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild);
+
+  const resetCmd = new SlashCommandBuilder()
+    .setName('reset').setDescription('Narzędzia resetowania')
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+    .addSubcommand(s => s.setName('cooldown').setDescription('Zdejmuje blokadę ponownego podania na Media po odrzuceniu')
+      .addUserOption(o => o.setName('gracz').setDescription('Gracz, któremu resetujesz cooldown').setRequired(true)));
+
+  async function handleReset(i) {
+    if (!isAdmin(i)) return i.reply({ content: '❌ Nie masz uprawnień.', flags: EPHEMERAL });
+    if (i.options.getSubcommand() !== 'cooldown') return;
+    const user = i.options.getUser('gracz', true);
+    const had = store.getMediaCd(user.id) > Date.now();
+    store.setMediaCd(user.id, 0);
+    return i.reply({
+      content: had
+        ? `🔄 Zresetowano cooldown podań Media dla <@${user.id}> – może od razu złożyć nowe podanie.`
+        : `ℹ️ <@${user.id}> nie miał aktywnego cooldownu (nic nie zmieniłem).`,
+      flags: EPHEMERAL, allowedMentions: { parse: [] },
+    });
+  }
 
   // ================= panel =================
   function panelMessage() {
@@ -380,14 +401,15 @@ export function createMedia({ client, store, env, isAdmin, serverName }) {
   }
 
   return {
-    commands: [mediaCmd],
+    commands: [mediaCmd, resetCmd],
     onMessage,
     handleButton,
     handleModal,
     handleCommand: async i => {
+      if (i.commandName === 'reset') return handleReset(i);
       if (i.commandName !== 'media') return;
       if (!isAdmin(i)) return i.reply({ content: '❌ Nie masz uprawnień.', flags: EPHEMERAL });
-      return i.reply(panelMessage());
+      return sendPanel(i, panelMessage());
     },
   };
 }

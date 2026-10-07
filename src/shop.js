@@ -1,3 +1,4 @@
+import { sendPanel } from './util.js';
 import {
   ActionRowBuilder, ButtonBuilder, ButtonStyle, ContainerBuilder, EmbedBuilder, MessageFlags,
   PermissionFlagsBits, SectionBuilder, SeparatorBuilder, SeparatorSpacingSize, SlashCommandBuilder,
@@ -123,7 +124,7 @@ export function createShop({ client, env, isAdmin, serverName, tickets }) {
     handleCommand: async i => {
       if (i.commandName !== 'cennik') return;
       if (!isAdmin(i)) return i.reply({ content: '❌ Nie masz uprawnień.', flags: EPHEMERAL });
-      return i.reply(panelMessage());
+      return sendPanel(i, panelMessage());
     },
     handleSelect,
     handleButton,

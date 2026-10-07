@@ -1,3 +1,4 @@
+import { sendPanel } from './util.js';
 import crypto from 'node:crypto';
 import {
   ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, Events, MessageFlags,
@@ -103,7 +104,7 @@ export function createVerify({ client, env, isAdmin, serverName }) {
     handleCommand: async i => {
       if (i.commandName !== 'weryfikacja') return;
       if (!isAdmin(i)) return i.reply({ content: '❌ Nie masz uprawnień.', flags: EPHEMERAL });
-      return i.reply(panelMessage());
+      return sendPanel(i, panelMessage());
     },
     handleButton, handleModal,
   };

@@ -6,7 +6,7 @@ import {
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { genKey, parseDuration, parseText, isExpired, expiryText } from './util.js';
+import { genKey, parseDuration, parseText, isExpired, expiryText, sendPanel } from './util.js';
 import { createVerify } from './verify.js';
 import { createTickets } from './tickets.js';
 import { createLegit } from './legit.js';
@@ -15,6 +15,7 @@ import { createGiveaway } from './giveaway.js';
 import { createShop } from './shop.js';
 import { createAntiInvite } from './antiinvite.js';
 import { createBoost } from './boost.js';
+import { createImageGuard } from './imageguard.js';
 import { MODS, DEFAULT_MOD } from './mods.js';
 import { findAsset } from './assets.js';
 
@@ -37,7 +38,7 @@ export function createBot({ store, env }) {
   intents.push(GatewayIntentBits.GuildMessages);
   // tresc wiadomosci (uprzywilejowane): propozycje + antyreklama (wylaczysz ja: ANTI_INVITE=0)
   const antiInviteOn = !['0', 'off', 'false', 'nie'].includes(String(env.ANTI_INVITE || '').toLowerCase());
-  if (env.PROPOSALS_CHANNEL_ID || antiInviteOn) intents.push(GatewayIntentBits.MessageContent);
+  if (env.PROPOSALS_CHANNEL_ID || antiInviteOn || env.IMAGE_CHANNEL_IDS || env.IMAGE_CHANNEL_ID) intents.push(GatewayIntentBits.MessageContent);
   // wiadomosci prywatne (podania na Media) - tresc PV nie wymaga uprzywilejowanego intentu
   intents.push(GatewayIntentBits.DirectMessages);
   const client = new Client({ intents, partials: [Partials.Channel] });
@@ -56,6 +57,7 @@ export function createBot({ store, env }) {
   const shop = createShop({ client, env, isAdmin, serverName, tickets });
   const antiInvite = createAntiInvite({ client, env, serverName });
   const boost = createBoost({ client, env, serverName });
+  const imageGuard = createImageGuard({ env });
   const giveaway = createGiveaway({ client, store, isAdmin });
 
   // ================= wiadomosc o licencji =================
@@ -336,6 +338,7 @@ export function createBot({ store, env }) {
   client.on(Events.MessageCreate, async message => {
     if (await boost.onMessage(message).catch(e => (console.error('Boost:', e), false))) return;
     if (await antiInvite.onMessage(message).catch(e => (console.error('Antyreklama:', e), false))) return;
+    if (await imageGuard.check(message).catch(e => (console.error('Blokada zdjec:', e), false))) return;
     legit.onMessage(message);
     media.onMessage(message).catch(e => console.error('Media (PV):', e));
     if (!env.PROPOSALS_CHANNEL_ID || message.channelId !== env.PROPOSALS_CHANNEL_ID) return;
@@ -608,7 +611,7 @@ export function createBot({ store, env }) {
         if (i.commandName === 'weryfikacja') await verify.handleCommand(i);
         else if (i.commandName === 'zgloszenia') await tickets.handleCommand(i);
         else if (i.commandName === 'licznik') await legit.handleCommand(i);
-        else if (i.commandName === 'media') await media.handleCommand(i);
+        else if (i.commandName === 'media' || i.commandName === 'reset') await media.handleCommand(i);
         else if (i.commandName === 'konkurs' || i.commandName === 'konkurs_wylacz' || i.commandName === 'roll') await giveaway.handleCommand(i);
         else if (i.commandName === 'cennik') await shop.handleCommand(i);
         else if (i.commandName === 'resethwid') await handleResetCmd(i);
@@ -616,10 +619,10 @@ export function createBot({ store, env }) {
         else if (i.commandName === 'licencja') await handleCreate(i);
         else if (i.commandName === 'panel') {
           if (!isAdmin(i)) return i.reply({ content: '❌ Nie masz uprawnień.', flags: EPHEMERAL });
-          await i.reply(panelMessage());
+          await sendPanel(i, panelMessage());
         } else if (i.commandName === 'instalacja') {
           if (!isAdmin(i)) return i.reply({ content: '❌ Nie masz uprawnień.', flags: EPHEMERAL });
-          await i.reply(installPanelMessage());
+          await sendPanel(i, installPanelMessage());
         }
       } else if (i.isButton()) await handleButton(i);
       else if (i.isStringSelectMenu()) {
@@ -671,6 +674,13 @@ export function createBot({ store, env }) {
       else if (env.WELCOME_IMAGE_URL) embed.setImage(env.WELCOME_IMAGE_URL);
       await ch.send(payload);
     } catch (e) { console.error('Powitanie nie wyszlo:', e.message); }
+  });
+
+  client.on(Events.MessageUpdate, async (_old, message) => {
+    try {
+      if (message.partial) message = await message.fetch();
+      await imageGuard.check(message);
+    } catch { /* wiadomosc juz usunieta albo brak dostepu */ }
   });
 
   client.on(Events.GuildMemberUpdate, (_old, member) => { boost.syncMember(member).catch(() => {}); });

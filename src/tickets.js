@@ -1,3 +1,4 @@
+import { sendPanel } from './util.js';
 import {
   ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, EmbedBuilder, MessageFlags,
   PermissionFlagsBits as P, PermissionFlagsBits, SlashCommandBuilder, StringSelectMenuBuilder, StringSelectMenuOptionBuilder,
@@ -199,16 +200,8 @@ export function createTickets({ client, env, isAdmin, serverName }) {
     handleCommand: async i => {
       if (i.commandName !== 'zgloszenia') return;
       if (!isAdmin(i)) return i.reply({ content: '❌ Nie masz uprawnień.', flags: EPHEMERAL });
-      try { return await i.reply(panelMessage()); }
-      catch (e) {
-        console.error('Panel zgloszen (1. proba):', e);
-        // 2. proba: bez grafiki (np. brak uprawnienia "Dolaczanie plikow")
-        try { return await i.reply(panelMessage({ noBanner: true })); }
-        catch (e2) {
-          console.error('Panel zgloszen (2. proba):', e2);
-          return i.reply({ content: `❌ Nie udało się wysłać panelu: ${e2.message}`, flags: EPHEMERAL });
-        }
-      }
+      // 2. proba: bez grafiki (np. brak uprawnienia "Dolaczanie plikow")
+      return sendPanel(i, panelMessage(), panelMessage({ noBanner: true }));
     },
     handleSelect,
     open,

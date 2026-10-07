@@ -200,7 +200,7 @@ export function createGiveaway({ client, store, isAdmin }) {
     const pool = gw.participants.filter(x => !taken.has(x));
     if (!pool.length) return i.reply({ content: '❌ Nie ma już nikogo do wylosowania – wszyscy uczestnicy już wygrali.', flags: EPHEMERAL });
 
-    await i.deferReply();
+    await i.deferReply({ flags: EPHEMERAL });
     const picked = await pick(i.guild, pool, n);
     if (!picked.length) return i.editReply('❌ Pozostali uczestnicy opuścili już serwer – nie ma kogo wylosować.');
 
@@ -215,10 +215,11 @@ export function createGiveaway({ client, store, isAdmin }) {
     } catch (e) { console.error('Roll - edycja wiadomosci konkursu:', e.message); }
 
     const link = `https://discord.com/channels/${gw.guildId}/${gw.channelId}/${gw.id}`;
-    return i.editReply({
+    await i.channel.send({
       content: `🎲 ${picked.length === 1 ? 'Nowy zwycięzca' : 'Nowi zwycięzcy'} konkursu na **${gw.prize}**: ${picked.map(x => `<@${x}>`).join(', ')} – gratulacje! 🎉\n-# [Przejdź do konkursu](${link})`,
       allowedMentions: { users: picked },
     });
+    return i.editReply('✅ Wylosowano – wynik jest na kanale.');
   }
 
   return {
