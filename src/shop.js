@@ -11,6 +11,13 @@ const EPHEMERAL = MessageFlags.Ephemeral;
  * Oferty modow (panel /cennik). Nowy mod = nowy wpis w OFFERS (klucz musi byc taki sam jak w src/mods.js).
  */
 const OFFERS = {
+  botyluma: {
+    label: 'BotyLuma', emoji: '🤖', desc: 'Cennik i zakup moda BotyLuma',
+    title: 'Oferta BotyLuma', subtitle: 'Automat BotyLuma do Minecraft 1.21.11',
+    prices: [['1 tydzień', 'Cena u administracji'], ['1 miesiąc', 'Cena u administracji'], ['Lifetime', 'Cena u administracji']],
+    addons: [{ name: 'Reset HWID', price: 'Cena u administracji', info: true }],
+    payments: [['Ustal w tickecie']],
+  },
   autorynek: {
     label: 'AutoRynek', emoji: '🔑', desc: 'Cennik i zakup moda AutoRynek',
     title: 'Oferta AutoRynek',

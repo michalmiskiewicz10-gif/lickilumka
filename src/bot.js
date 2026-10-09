@@ -133,17 +133,24 @@ export function createBot({ store, env }) {
   const modDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'mod');
 
   /** Najnowszy plik .jar z folderu mod/ - dolaczany do instrukcji, zeby gracz mogl go od razu pobrac. */
-  function modFile() {
+  function modFile(modId = DEFAULT_MOD) {
     try {
-      const jars = fs.readdirSync(modDir).filter(f => f.toLowerCase().endsWith('.jar'))
+      const prefix = modId === 'botyluma' ? 'lumabots' : 'autorynek';
+      const jars = fs.readdirSync(modDir).filter(f => f.toLowerCase().endsWith('.jar') && f.toLowerCase().startsWith(prefix))
         .map(f => ({ f, t: fs.statSync(path.join(modDir, f)).mtimeMs })).sort((a, b) => b.t - a.t);
       return jars.length ? { attachment: path.join(modDir, jars[0].f), name: jars[0].f } : null;
     } catch { return null; }
   }
 
   /** mine = licencje kupujacego (gdy podane, kod pojawia sie w instrukcji; tylko dla wiadomosci ukrytej). */
-  function helpMessage(mine = null) {
-    const file = modFile();
+  function helpMessage(mine = null, modId = DEFAULT_MOD) {
+    if (modId === 'botyluma') {
+      const file = modFile(modId);
+      const embed = new EmbedBuilder().setColor(0x5865f2).setTitle('🤖 Instalacja BotyLuma')
+        .setDescription('Zainstaluj Fabric dla Minecraft 1.21.11 oraz Fabric API. Umieść plik moda w folderze `%appdata%\\.minecraft\\mods`. W grze naciśnij **X**, wklej kod licencji BotyLuma w okienku i kliknij **Aktywuj**. Po pozytywnej weryfikacji otworzy się GUI. Kod AutoRynek nie działa w BotyLuma.' + (file ? `\n\n📦 Plik **${file.name}** dołączono poniżej.` : '\n\n⚠️ Plik .jar BotyLuma musi zostać dodany przez administrację do folderu `mod/`.'));
+      return { embeds: [embed], ...(file ? { files: [file] } : {}) };
+    }
+    const file = modFile(modId);
     const download = file
       ? `• Plik **\`${file.name}\`** jest **dołączony do tej wiadomości** – kliknij jego nazwę, żeby go pobrać.`
       : (env.MOD_DOWNLOAD_URL ? `• Plik \`autorynek-….jar\` pobierzesz stąd: [kliknij tutaj](${env.MOD_DOWNLOAD_URL}).` : '• Plik moda dostaniesz od administracji.');
@@ -430,9 +437,10 @@ export function createBot({ store, env }) {
 
     // opcjonalnie: kopia dla administracji z przyciskami Przedluz / Uniewaznij (gdy ustawiono LICENSE_CHANNEL_ID)
     let adminNote = '';
-    if (env.LICENSE_CHANNEL_ID && env.LICENSE_CHANNEL_ID !== channel.id) {
+    const adminTargetId = modId === 'botyluma' ? env.LUMABOTS_LICENSE_CHANNEL_ID : env.LICENSE_CHANNEL_ID;
+    if (adminTargetId && adminTargetId !== channel.id) {
       try {
-        const ach = await client.channels.fetch(env.LICENSE_CHANNEL_ID);
+        const ach = await client.channels.fetch(adminTargetId);
         const amsg = await ach.send(buildMessage(lic, { buttons: true }));
         lic.adminChannelId = ach.id; lic.adminMessageId = amsg.id;
         adminNote = `\nKopia z przyciskami dla administracji: <#${ach.id}>.`;
@@ -442,13 +450,22 @@ export function createBot({ store, env }) {
     }
     store.put(lic);
 
-    // zaraz pod licencja: plik z modem + instrukcja jak go pobrac i zainstalowac
-    try { await channel.send(helpMessage()); }
-    catch (e) { adminNote += `\n⚠️ Nie udało się wysłać instrukcji z plikiem moda: ${e.message}`; }
-
+    // Wyslij wlasciwy plik moda wybranego w /licencja.
+    const selectedJar = modFile(modId);
+    let deliveryNote = '';
+    if (selectedJar) {
+      try {
+        await channel.send(helpMessage(null, modId));
+        deliveryNote = `\n📦 Wysłano plik **${selectedJar.name}** na kanał licencji.`;
+      } catch (e) {
+        deliveryNote = `\n⚠️ Nie udało się wysłać pliku moda: ${e.message}`;
+      }
+    } else {
+      deliveryNote = `\n⚠️ Brak pliku .jar dla **${MODS[modId].label}** w folderze \`mod/\`. `
+        + (modId === 'botyluma' ? 'Dodaj plik o nazwie zaczynającej się od \`lumabots\`.' : 'Dodaj plik o nazwie zaczynającej się od \`autorynek\`.');
+    }
     return i.reply({
-      content: `✅ Licencja utworzona dla <@${user.id}> (wiadomość jest powyżej).\n**Kod:** \`${key}\` (widzisz go tylko Ty)\n`
-        + `Instrukcja i plik moda zostały wysłane pod licencją.${adminNote}`,
+      content: `✅ Licencja utworzona dla <@${user.id}> (wiadomość jest powyżej).\n**Kod:** \`${key}\` (widzisz go tylko Ty)${deliveryNote}${adminNote}`,
       flags: EPHEMERAL,
     });
   }
@@ -584,7 +601,7 @@ export function createBot({ store, env }) {
         return i.reply({ content: 'Wybierz moda, którego licencję chcesz sprawdzić:', components: [modSelectRow()], flags: EPHEMERAL });
       }
       const mine = store.byDiscord(i.user.id).filter(l => !l.revoked);
-      return i.reply({ ...helpMessage(mine), flags: EPHEMERAL });
+      return i.reply({ ...helpMessage(mine, modId), flags: EPHEMERAL });
     }
     if (action === 'verify') return verify.handleButton(i);
     if (action === 'ticket') return tickets.handleButton(i);
