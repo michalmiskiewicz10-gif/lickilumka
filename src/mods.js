@@ -5,6 +5,7 @@
  * i zrestartuj bota - pojawi sie na liscie wyboru.
  */
 export const MODS = {
+  botyluma: { label: 'BotyLuma', emoji: '🤖', desc: 'Licencja do moda BotyLuma' },
   autorynek: { label: 'AutoRynek', emoji: '🔑', desc: 'Licencja do moda AutoRynek' },
 };
 

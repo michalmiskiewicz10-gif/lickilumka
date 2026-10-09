@@ -6,9 +6,10 @@ const HWID_RE = /^[0-9a-f]{64}$/;
 const NONCE_RE = /^[0-9a-f]{16,64}$/;
 
 /** Sprawdza licencje. Przy pierwszym poprawnym uzyciu PRZYPISUJE ja do komputera (hwid). */
-export function evaluate(store, { key, hwid }, now = Date.now()) {
+export function evaluate(store, { key, hwid, mod }, now = Date.now()) {
   const lic = store.get(key);
   if (!lic) return { ok: false, reason: 'not_found' };
+  if (!['autorynek', 'botyluma'].includes(mod) || (lic.mod || 'autorynek') !== mod) return { ok: false, reason: 'wrong_mod' };
   if (lic.revoked) return { ok: false, reason: 'revoked' };
   if (lic.expiresAt != null && now >= lic.expiresAt) return { ok: false, reason: 'expired' };
   // po resecie HWID stary komputer jest zablokowany dla tego kodu (nie da sie go ponownie przypiac)
@@ -65,12 +66,12 @@ export function createApi({ store, privateKey, onActivated, log = console }) {
     req.on('end', () => {
       let body;
       try { body = JSON.parse(raw); } catch { return send(400, 'bad json'); }
-      const { key, hwid, nonce } = body || {};
+      const { key, hwid, nonce, mod } = body || {};
       if (!KEY_RE.test(key || '') || !HWID_RE.test(hwid || '') || !NONCE_RE.test(nonce || '')) {
         log.log(`[licencja] 400 bad request: key=${KEY_RE.test(key || '')} hwid=${HWID_RE.test(hwid || '')} nonce=${NONCE_RE.test(nonce || '')}`);
         return send(400, 'bad request');
       }
-      const r = evaluate(store, { key, hwid });
+      const r = evaluate(store, { key, hwid, mod });
       const exp = r.ok ? (r.lic.expiresAt ?? 0) : 0; // 0 = permanentna
       send(200, signed({ ok: r.ok, reason: r.reason, nonce, exp, ts: Date.now() }));
       if (r.ok && r.activated) {

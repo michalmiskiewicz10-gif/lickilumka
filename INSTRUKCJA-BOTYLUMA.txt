@@ -1,0 +1,4 @@
+BotyLuma dodany do src/mods.js i API. Zrestartuj bota i odswiez komendy Discord.
+W obu modach ustaw ten sam PUBLIC_KEY_B64 i SERVER_URL (adres Twojego VPS, nie 127.0.0.1 na komputerze gracza).
+Kazde sprawdzenie przesyla mod=autorynek albo mod=botyluma; serwer odrzuca kody innych modow.
+Zbuduj obydwa mody przy uzyciu gradlew build. LumaBots: /lumabots licencja XXXX-XXXX-XXXX-XXXX.
