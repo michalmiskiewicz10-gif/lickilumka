@@ -14,9 +14,14 @@ const OFFERS = {
   botyluma: {
     label: 'BotyLuma', emoji: '🤖', desc: 'Cennik i zakup moda BotyLuma',
     title: 'Oferta BotyLuma', subtitle: 'Automat BotyLuma do Minecraft 1.21.11',
-    prices: [['1 tydzień', 'Cena u administracji'], ['1 miesiąc', 'Cena u administracji'], ['Lifetime', 'Cena u administracji']],
-    addons: [{ name: 'Reset HWID', price: 'Cena u administracji', info: true }],
-    payments: [['Ustal w tickecie']],
+    prices: [
+      ['1 tydzień', '10,00 zł'],
+      ['1 miesiąc', '30,00 zł'],
+      ['3 miesiące', '60,00 zł'],
+      ['Lifetime', '100,00 zł'],
+    ],
+    addons: [{ name: 'Reset HWID', price: '5,00 zł', info: true }],
+    payments: [['BLIK'], ['PayPal'], ['Paysafecard', 'prowizja +10,00 zł']],
   },
   autorynek: {
     label: 'AutoRynek', emoji: '🔑', desc: 'Cennik i zakup moda AutoRynek',
