@@ -14,6 +14,8 @@ import { createPhotoChannel } from './photochannel.js';
 import { createMedia } from './media.js';
 import { createGiveaway } from './giveaway.js';
 import { createShop } from './shop.js';
+import { createDownload } from './download.js';
+import { pickJar, versionsFor, LEGACY_MC, MC_VERSIONS } from './jars.js';
 import { createAntiInvite } from './antiinvite.js';
 import { createBoost } from './boost.js';
 import { createImageGuard } from './imageguard.js';
@@ -67,6 +69,7 @@ export function createBot({ store, env }) {
   const legit = createLegit({ store, env, isAdmin, serverName });
   const media = createMedia({ client, store, env, isAdmin, serverName });
   const shop = createShop({ client, env, isAdmin, serverName, tickets });
+  const download = createDownload({ client, store, isAdmin, serverName, modDir: path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'mod') });
   const antiInvite = createAntiInvite({ client, env, serverName });
   const boost = createBoost({ client, env, serverName });
   const photoChannel = createPhotoChannel({ env, serverName });
@@ -132,25 +135,21 @@ export function createBot({ store, env }) {
   // ================= instrukcja =================
   const modDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'mod');
 
-  /** Najnowszy plik .jar z folderu mod/ - dolaczany do instrukcji, zeby gracz mogl go od razu pobrac. */
-  function modFile(modId = DEFAULT_MOD) {
-    try {
-      const prefix = (MODS[modId] || MODS[DEFAULT_MOD]).jarPrefix;
-      const jars = fs.readdirSync(modDir).filter(f => f.toLowerCase().endsWith('.jar') && f.toLowerCase().startsWith(prefix))
-        .map(f => ({ f, t: fs.statSync(path.join(modDir, f)).mtimeMs })).sort((a, b) => b.t - a.t);
-      return jars.length ? { attachment: path.join(modDir, jars[0].f), name: jars[0].f } : null;
-    } catch { return null; }
+  /** Plik .jar moda dla danej wersji MC (domyslnie 1.21.11) z folderu mod/ - dolaczany do instrukcji. Inne wersje: panel /pobierz. */
+  function modFile(modId = DEFAULT_MOD, ver = LEGACY_MC) {
+    const jar = pickJar(modDir, modId, ver);
+    return jar ? { attachment: jar.path, name: jar.name } : null;
   }
 
   /** mine = licencje kupujacego (gdy podane, kod pojawia sie w instrukcji; tylko dla wiadomosci ukrytej). */
-  function helpMessage(mine = null, modId = DEFAULT_MOD) {
+  function helpMessage(mine = null, modId = DEFAULT_MOD, ver = LEGACY_MC) {
     if (modId === 'botyluma') {
-      const file = modFile(modId);
+      const file = modFile(modId, ver);
       const embed = new EmbedBuilder().setColor(0x5865f2).setTitle('🤖 Instalacja BotyLuma')
-        .setDescription('Zainstaluj Fabric dla Minecraft 1.21.11 oraz Fabric API. Umieść plik moda w folderze `%appdata%\\.minecraft\\mods`. W grze naciśnij **X**, wklej kod licencji BotyLuma w okienku i kliknij **Aktywuj**. Po pozytywnej weryfikacji otworzy się GUI. Kod AutoRynek nie działa w BotyLuma.' + (file ? `\n\n📦 Plik **${file.name}** dołączono poniżej.` : '\n\n⚠️ Plik .jar BotyLuma musi zostać dodany przez administrację do folderu `mod/`.'));
+        .setDescription(`Zainstaluj Fabric dla Minecraft ${ver} oraz Fabric API. Umieść plik moda w folderze \`%appdata%\\.minecraft\\mods\`. W grze naciśnij **X**, wklej kod licencji BotyLuma w okienku i kliknij **Aktywuj**. Po pozytywnej weryfikacji otworzy się GUI. Kod AutoRynek nie działa w BotyLuma.` + (file ? `\n\n📦 Plik **${file.name}** dołączono poniżej.` : '\n\n⚠️ Plik .jar BotyLuma musi zostać dodany przez administrację do folderu `mod/`.'));
       return { embeds: [embed], ...(file ? { files: [file] } : {}) };
     }
-    const file = modFile(modId);
+    const file = modFile(modId, ver);
     const mod = MODS[modId] || MODS[DEFAULT_MOD];
     const download = file
       ? `• Plik **\`${file.name}\`** jest **dołączony do tej wiadomości** – kliknij jego nazwę, żeby go pobrać.`
@@ -160,17 +159,17 @@ export function createBot({ store, env }) {
       .setColor(0x5865f2)
       .setTitle(`📖 Jak zainstalować moda ${mod.label} (${serverName})`)
       .setDescription([
-        'Mod działa **tylko na wersji Minecrafta 1.21.11** z **Fabric**. Zrób to raz, krok po kroku:',
+        `Ten plik jest na **Minecrafta ${ver}** z **Fabric** (licencja działa na każdej wersji). Zrób to raz, krok po kroku:`,
         '',
         '**Krok 1 – Zainstaluj Fabric**',
         '• Wejdź na https://fabricmc.net/use/installer/ i pobierz instalator (dla Windows: plik `.exe`).',
-        '• Uruchom go, jako wersję Minecrafta wybierz **1.21.11** i kliknij **Install**.',
-        '• Otwórz Minecraft Launcher, wybierz profil **fabric-loader-1.21.11** i raz uruchom grę. Potem ją zamknij (powstanie folder `mods`).',
+        `• Uruchom go, jako wersję Minecrafta wybierz **${ver}** i kliknij **Install**.`,
+        `• Otwórz Minecraft Launcher, wybierz profil **fabric-loader-${ver}** i raz uruchom grę. Potem ją zamknij (powstanie folder \`mods\`).`,
         '',
         '**Krok 2 – Pobierz Fabric API**',
-        '• Wejdź na https://modrinth.com/mod/fabric-api/versions, wybierz wersję **1.21.11** (Fabric) i kliknij **Download**.',
+        `• Wejdź na https://modrinth.com/mod/fabric-api/versions, wybierz wersję **${ver}** (Fabric) i kliknij **Download**.`,
         '',
-        `**Krok 3 – Pobierz moda ${mod.label} (wersja 1.21.11)**`,
+        `**Krok 3 – Pobierz moda ${mod.label} (wersja ${ver})**`,
         download,
         '',
         '**Krok 4 – Wrzuć pliki do folderu mods**',
@@ -178,7 +177,7 @@ export function createBot({ store, env }) {
         `• Skopiuj tam **dwa** pliki: \`fabric-api-….jar\` i \`${mod.jarPrefix}-….jar\`.`,
         '',
         '**Krok 5 – Uruchom grę**',
-        '• W Minecraft Launcherze wybierz profil **fabric-loader-1.21.11** i kliknij **Graj**.',
+        `• W Minecraft Launcherze wybierz profil **fabric-loader-${ver}** i kliknij **Graj**.`,
         mod.openKey
           ? `• W grze naciśnij **${mod.openKey}** – mod wyświetli okno **„${mod.label} – licencja”** – przejdź do aktywacji.`
           : `• Gdy gra się włączy, mod wyświetli okno **„${mod.label} – licencja”** – przejdź do aktywacji.`,
@@ -386,7 +385,40 @@ export function createBot({ store, env }) {
     .addIntegerOption(o => o.setName('ilosc').setDescription('Ile sekund/minut/godzin/dni (pomiń przy permanentnej)')
       .setMinValue(1).setMaxValue(3650 * 86400))
     .addStringOption(o => o.setName('mod').setDescription('Którego moda dotyczy licencja (domyślnie AutoRynek)')
-      .addChoices(...Object.entries(MODS).map(([value, m]) => ({ name: m.label, value }))));
+      .addChoices(...Object.entries(MODS).map(([value, m]) => ({ name: m.label, value }))))
+    .addStringOption(o => o.setName('wersja').setDescription('Wersja Minecrafta pliku moda - wpisz np. 1.21.1 (domyślnie 1.21.11); licencja działa na każdej')
+      .setAutocomplete(true));
+
+  const clearCmd = new SlashCommandBuilder()
+    .setName('clear').setDescription('Usuwa podaną liczbę ostatnich wiadomości na tym kanale')
+    .addIntegerOption(o => o.setName('ilosc').setDescription('Ile wiadomości usunąć (1-1000)').setRequired(true).setMinValue(1).setMaxValue(1000))
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages);
+
+  async function handleClear(i) {
+    const allowed = isAdmin(i) || (i.memberPermissions?.has(PermissionFlagsBits.ManageMessages) ?? false);
+    if (!allowed) return i.reply({ content: '❌ Nie masz uprawnień (wymagane: Zarządzanie wiadomościami).', flags: EPHEMERAL });
+    const channel = i.channel;
+    if (!channel?.bulkDelete) return i.reply({ content: '❌ Na tym kanale nie można usuwać wiadomości.', flags: EPHEMERAL });
+
+    const want = i.options.getInteger('ilosc', true);
+    await i.deferReply({ flags: EPHEMERAL });
+
+    let deleted = 0, left = want;
+    try {
+      while (left > 0) {
+        const batch = Math.min(100, left);
+        const res = await channel.bulkDelete(batch, true);   // true = pomija wiadomosci starsze niz 14 dni (limit Discorda)
+        deleted += res.size;
+        left -= batch;
+        if (res.size < batch) break;                          // koniec wiadomosci / zostaly tylko stare
+      }
+    } catch (e) {
+      return i.editReply(`❌ Nie udało się usunąć wiadomości: ${e.message}\nSprawdź, czy bot ma na tym kanale uprawnienia **Zarządzanie wiadomościami** i **Czytanie historii wiadomości**.`);
+    }
+
+    const old = deleted < want ? `\nℹ️ Usunięto mniej niż podano – Discord nie pozwala masowo usuwać wiadomości starszych niż 14 dni (albo na kanale nie było tylu wiadomości).` : '';
+    return i.editReply(`🧹 Usunięto **${deleted}** wiadomości.${old}`);
+  }
 
   const panelCmd = new SlashCommandBuilder()
     .setName('panel').setDescription('Wysyła na kanał panel licencji (przyciski dla graczy)')
@@ -403,6 +435,14 @@ export function createBot({ store, env }) {
     const unit = i.options.getString('jednostka', true);
     const amount = i.options.getInteger('ilosc');
     const modId = i.options.getString('mod') || DEFAULT_MOD;
+    const verRaw = (i.options.getString('wersja') || '').trim().toLowerCase().replace(/^(minecraft|mc|v)\s*/, '');
+    const ver = verRaw || LEGACY_MC;
+    if (!MC_VERSIONS.includes(ver)) {
+      return i.reply({
+        content: `❌ Nieznana wersja Minecrafta: \`${verRaw}\`. Wpisz jedną z: ${[...MC_VERSIONS].reverse().join(', ')}. Licencja nie została utworzona.`,
+        flags: EPHEMERAL,
+      });
+    }
 
     const dur = parseDuration(unit, amount);
     if (!dur) {
@@ -454,18 +494,21 @@ export function createBot({ store, env }) {
     store.put(lic);
 
     // Wyslij wlasciwy plik moda wybranego w /licencja.
-    const selectedJar = modFile(modId);
+    const selectedJar = modFile(modId, ver);
     let deliveryNote = '';
     if (selectedJar) {
       try {
-        await channel.send(helpMessage(null, modId));
-        deliveryNote = `\n📦 Wysłano plik **${selectedJar.name}** na kanał licencji.`;
+        await channel.send(helpMessage(null, modId, ver));
+        deliveryNote = `\n📦 Wysłano plik **${selectedJar.name}** (MC ${ver}) na kanał licencji.`;
       } catch (e) {
         deliveryNote = `\n⚠️ Nie udało się wysłać pliku moda: ${e.message}`;
       }
     } else {
-      deliveryNote = `\n⚠️ Brak pliku .jar dla **${MODS[modId].label}** w folderze \`mod/\`. `
-        + `Dodaj plik o nazwie zaczynającej się od \`${MODS[modId].jarPrefix}\`.`;
+      const have = versionsFor(modDir, modId).map(x => x.ver);
+      deliveryNote = `\n⚠️ Brak pliku .jar dla **${MODS[modId].label}** (MC ${ver}) w folderze \`mod/\`. `
+        + `Nazwa: \`${MODS[modId].jarPrefix}-WERSJA-mc${ver}.jar\`. `
+        + (have.length ? `Dostępne wersje tego moda: ${have.join(', ')}. ` : '')
+        + 'Gracz pobierze pliki w panelu /pobierz.';
     }
     return i.reply({
       content: `✅ Licencja utworzona dla <@${user.id}> (wiadomość jest powyżej).\n**Kod:** \`${key}\` (widzisz go tylko Ty)${deliveryNote}${adminNote}`,
@@ -678,6 +721,21 @@ export function createBot({ store, env }) {
 
   client.on(Events.InteractionCreate, async i => {
     try {
+      // podpowiedzi wersji MC przy wpisywaniu pola "wersja" w /licencja
+      if (i.isAutocomplete()) {
+        if (i.commandName === 'licencja') {
+          const modId = i.options.getString('mod') || DEFAULT_MOD;
+          const have = new Set(versionsFor(modDir, modId).map(x => x.ver));
+          const q = String(i.options.getFocused() || '').trim().toLowerCase().replace(/^(minecraft|mc|v)\s*/, '');
+          const list = [...MC_VERSIONS].reverse()
+            .filter(v => v.startsWith(q) || v.includes(q))
+            .sort((a, b) => (have.has(b) ? 1 : 0) - (have.has(a) ? 1 : 0))
+            .slice(0, 25)
+            .map(v => ({ name: `Minecraft ${v}${have.has(v) ? ' ✅ plik jest' : ' ⚠️ brak pliku'}`, value: v }));
+          await i.respond(list);
+        }
+        return;
+      }
       if (i.isChatInputCommand()) {
         if (i.commandName === 'weryfikacja') await verify.handleCommand(i);
         else if (i.commandName === 'zgloszenia' || i.commandName === 'zaproponuj_zamkniecie') await tickets.handleCommand(i);
@@ -685,11 +743,13 @@ export function createBot({ store, env }) {
         else if (i.commandName === 'media' || i.commandName === 'reset' || i.commandName === 'odrzuc_podanie') await media.handleCommand(i);
         else if (i.commandName === 'konkurs' || i.commandName === 'konkurs_wylacz' || i.commandName === 'roll') await giveaway.handleCommand(i);
         else if (i.commandName === 'cennik') await shop.handleCommand(i);
+        else if (i.commandName === 'pobierz' || i.commandName === 'mody') await download.handleCommand(i);
         else if (i.commandName === 'regulamin') await regulamin.handleCommand(i);
         else if (i.commandName === 'resethwid') await handleResetCmd(i);
         else if (i.commandName === 'usun_licencje') await handleRemoveCmd(i);
         else if (i.commandName === 'przedluz_wszystkie') await handleExtAllCmd(i);
         else if (i.commandName === 'licencja') await handleCreate(i);
+        else if (i.commandName === 'clear') await handleClear(i);
         else if (i.commandName === 'panel') {
           if (!isAdmin(i)) return i.reply({ content: '❌ Nie masz uprawnień.', flags: EPHEMERAL });
           await sendPanel(i, panelMessage());
@@ -701,6 +761,7 @@ export function createBot({ store, env }) {
       else if (i.isStringSelectMenu()) {
         if (i.customId === 'ticket:select') await tickets.handleSelect(i);
         else if (i.customId === 'shop:select') await shop.handleSelect(i);
+        else if (i.customId.startsWith('dl:')) await download.handleSelect(i);
         else if (i.customId === 'panel:modsel') {
           await handleMyLicense(i, i.values[0]);
           i.message.edit({ components: [modSelectRow()] }).catch(() => {});   // zerujemy zaznaczenie na panelu
@@ -762,7 +823,7 @@ export function createBot({ store, env }) {
     console.log(`Bot zalogowany jako ${c.user.tag}`);
     giveaway.start();
     if (boost.roleId && env.GUILD_ID) c.guilds.fetch(env.GUILD_ID).then(g => boost.syncAll(g)).catch(() => {});
-    const cmds = [licencjaCmd, panelCmd, instalacjaCmd, resetCmd, removeCmd, extAllCmd, ...shop.commands, ...regulamin.commands, ...verify.commands, ...tickets.commands, ...legit.commands, ...media.commands, ...giveaway.commands].map(x => x.toJSON());
+    const cmds = [licencjaCmd, clearCmd, panelCmd, instalacjaCmd, resetCmd, removeCmd, extAllCmd, ...shop.commands, ...download.commands, ...regulamin.commands, ...verify.commands, ...tickets.commands, ...legit.commands, ...media.commands, ...giveaway.commands].map(x => x.toJSON());
     try {
       if (env.GUILD_ID) {
         const guild = await c.guilds.fetch(env.GUILD_ID);

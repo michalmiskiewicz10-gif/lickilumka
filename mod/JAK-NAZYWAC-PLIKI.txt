@@ -1,0 +1,19 @@
+FOLDER mod/  -  pliki .jar wysylane graczom (panel /pobierz oraz instrukcja po /licencja)
+
+Nazwa pliku:   <prefiks>-<wersja moda>-mc<wersja Minecrafta>.jar
+
+  prefiks = autorynek | lumabots | playerhighlight   (jarPrefix z src/mods.js)
+
+Przyklady:
+  autorynek-1.11.0-mc1.21.1.jar            -> Minecraft 1.21.1
+  autorynek-1.11.0-mc1.21.4.jar            -> Minecraft 1.21.4
+  playerhighlight-1.0.0-mc1.21.2_1.21.3.jar -> jeden plik dla DWOCH wersji (rozdzielone _ lub +)
+  playerhighlight-1.0.0-mc1.21.11.jar      -> Minecraft 1.21.11
+
+Zasady:
+  - Plik BEZ "-mc..." w nazwie (np. stary autorynek-1.11.0.jar) jest traktowany jako wersja 1.21.11.
+  - Obslugiwane wersje: 1.21.1 ... 1.21.11 (lista MC_VERSIONS w src/jars.js).
+  - Na liscie wyboru w panelu pokazuja sie TYLKO wersje, dla ktorych plik jest w tym folderze.
+  - Gdy jest kilka plikow na te sama wersje, bot wysyla najnowszy (wg daty pliku).
+  - Pliki *-sources.jar i *-dev.jar sa pomijane.
+  - Nowy plik widac od razu - bota nie trzeba restartowac (folder jest czytany przy kazdym wyborze).

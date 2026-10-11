@@ -78,7 +78,7 @@ export function createShop({ client, env, isAdmin, serverName, tickets }) {
     const embed = new EmbedBuilder()
       .setColor(0xf5c542)
       .setTitle(`🛒 CENNIK ${serverName.toUpperCase()}`)
-      .setDescription('Wybierz moda z listy poniżej, aby zobaczyć jego ofertę i cennik (widzisz ją tylko Ty).');
+      .setDescription('Wybierz moda z listy poniżej, aby zobaczyć jego ofertę i cennik.');
     return { embeds: [embed], components: [selectRow()] };
   }
 
