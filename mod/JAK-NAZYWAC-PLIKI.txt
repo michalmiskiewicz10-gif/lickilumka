@@ -18,3 +18,9 @@ Zasady:
   - Gdy jest kilka plikow na te sama wersje, bot wysyla najnowszy (wg daty pliku).
   - Pliki *-sources.jar i *-dev.jar sa pomijane.
   - Nowy plik widac od razu - bota nie trzeba restartowac (folder jest czytany przy kazdym wyborze).
+
+WAZNE: Gradle zawsze buduje plik jako playerhighlight-1.0.0.jar (dla kazdej wersji MC ta sama nazwa),
+wiec dwoch takich plikow nie da sie trzymac w jednym folderze. Po zbudowaniu ZMIEN NAZWE zanim wrzucisz do mod/:
+  zbudowany pod 1.21.11  ->  playerhighlight-1.0.0-mc1.21.11.jar
+  zbudowany pod 1.21.1   ->  playerhighlight-1.0.0-mc1.21.1.jar
+(wersje MC mozesz sprawdzic w fabric.mod.json w srodku jara - pole "minecraft")

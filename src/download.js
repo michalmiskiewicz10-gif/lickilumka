@@ -39,7 +39,7 @@ export function createDownload({ store, isAdmin, serverName, modDir }) {
         'Wybierz moda z listy poniżej, a potem **wersję Minecrafta** – dostaniesz plik `.jar` (widzisz go tylko Ty).',
         '',
         '• Bot sprawdza, czy masz **aktywną licencję** na wybranego moda.',
-        '• Licencja działa na **każdej wersji** Minecrafta – wersję możesz zmieniać bez nowego kodu (licencja jest przypisana do komputera, nie do wersji).',
+        '• Licencja na część modów (np. **PlayerHighlight**) jest przypisana do **jednej wersji** Minecrafta – pobierzesz plik tylko dla tej wersji. Pozostałe mody działają na każdej wersji.',
       ].join('\n'));
     return { embeds: [embed], components: [modSelectRow()] };
   }
@@ -63,6 +63,14 @@ export function createDownload({ store, isAdmin, serverName, modDir }) {
     return { ok: false, message: `❌ Nie masz żadnej aktywnej licencji (w tym na **${label}**). Jeśli ją kupiłeś, napisz do administracji w zgłoszeniu.` };
   }
 
+  /** Wersje MC dozwolone dla gracza (mody z mcBound). null = wszystkie. */
+  function allowedVersions(userId, modId) {
+    if (!MODS[modId]?.mcBound) return null;
+    const act = store.byDiscord(userId).filter(l => !l.revoked && !isExpired(l) && (l.mod || DEFAULT_MOD) === modId);
+    if (act.some(l => !l.mcVersion)) return null;   // starsze licencje bez przypisanej wersji dzialaja wszedzie
+    return new Set(act.map(l => l.mcVersion));
+  }
+
   function instruction(modId, ver) {
     const m = MODS[modId];
     const lines = [
@@ -75,7 +83,9 @@ export function createDownload({ store, isAdmin, serverName, modDir }) {
         ? `4. Uruchom grę i naciśnij **${m.openKey}** – pojawi się okno licencji. Wklej kod i kliknij **Aktywuj** (albo wpisz \`${m.cmd} KOD\`).`
         : `4. Uruchom grę – pojawi się okno licencji. Wklej kod i kliknij **Aktywuj** (albo wpisz \`${m.cmd} KOD\`).`,
       '',
-      '🔑 Ten sam kod licencyjny działa na każdej wersji Minecrafta (na tym samym komputerze), dopóki licencja nie wygaśnie lub nie zostanie unieważniona.',
+      MODS[modId].mcBound
+        ? `🔑 Kod licencyjny działa tylko na wersji Minecrafta przypisanej do licencji (na tym samym komputerze), dopóki nie wygaśnie lub nie zostanie unieważniony.`
+        : '🔑 Ten sam kod licencyjny działa na każdej wersji Minecrafta (na tym samym komputerze), dopóki licencja nie wygaśnie lub nie zostanie unieważniona.',
     ];
     return new EmbedBuilder().setColor(0x5865f2).setTitle(`📖 ${m.label} – Minecraft ${ver}`).setDescription(lines.join('\n'));
   }
@@ -88,7 +98,11 @@ export function createDownload({ store, isAdmin, serverName, modDir }) {
     const acc = checkAccess(i.user.id, modId);
     if (!acc.ok) return i.reply({ content: acc.message, flags: EPHEMERAL });
 
-    const list = versionsFor(modDir, modId);
+    const allowed = allowedVersions(i.user.id, modId);
+    const list = versionsFor(modDir, modId).filter(x => !allowed || allowed.has(x.ver));
+    if (allowed && !list.length) {
+      return i.reply({ content: `⚠️ Twoja licencja na **${labelOf(modId)}** jest przypisana do Minecrafta **${[...allowed].join(', ')}**, ale plik dla tej wersji nie został jeszcze dodany przez administrację.`, flags: EPHEMERAL });
+    }
     if (!list.length) {
       return i.reply({ content: `⚠️ Pliki moda **${labelOf(modId)}** nie zostały jeszcze dodane przez administrację. Spróbuj później.`, flags: EPHEMERAL });
     }
@@ -97,7 +111,7 @@ export function createDownload({ store, isAdmin, serverName, modDir }) {
         .addOptions(list.map(({ ver, jar }) =>
           new StringSelectMenuOptionBuilder().setLabel(`Minecraft ${ver}`).setDescription(jar.name.slice(0, 100)).setValue(ver))),
     );
-    return i.reply({ content: `✅ Masz aktywną licencję na **${labelOf(modId)}**. Wybierz wersję Minecrafta:`, components: [row], flags: EPHEMERAL });
+    return i.reply({ content: `✅ Masz aktywną licencję na **${labelOf(modId)}**.${allowed ? ` Licencja działa tylko na Minecrafcie **${[...allowed].join(', ')}**.` : ''} Wybierz wersję Minecrafta:`, components: [row], flags: EPHEMERAL });
   }
 
   async function handleVersionSelect(i) {
@@ -107,6 +121,9 @@ export function createDownload({ store, isAdmin, serverName, modDir }) {
 
     const acc = checkAccess(i.user.id, modId);   // sprawdzamy ponownie - licencja mogla w miedzyczasie wygasnac / zostac uniewazniona
     if (!acc.ok) return i.reply({ content: acc.message, flags: EPHEMERAL });
+
+    const allowed = allowedVersions(i.user.id, modId);
+    if (allowed && !allowed.has(ver)) return i.reply({ content: `❌ Twoja licencja na **${labelOf(modId)}** działa tylko na Minecrafcie **${[...allowed].join(', ')}** (nie na ${ver}).`, flags: EPHEMERAL });
 
     const found = versionsFor(modDir, modId).find(x => x.ver === ver);   // plik wybieramy z listy na dysku, nie z tekstu od gracza
     if (!found) return i.reply({ content: `⚠️ Brak pliku **${labelOf(modId)}** dla Minecrafta ${ver}.`, flags: EPHEMERAL });

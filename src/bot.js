@@ -100,6 +100,8 @@ export function createBot({ store, env }) {
       )
       .setTimestamp(lic.createdAt);
 
+    if (lic.mcVersion) embed.addFields({ name: 'Wersja Minecrafta', value: `${lic.mcVersion} (licencja działa tylko na tej wersji)`, inline: true });
+
     if (!buttons) return { embeds: [embed] };   // wersja publiczna (w tickecie) - bez przyciskow
 
     const dead = !!lic.revoked;
@@ -159,7 +161,7 @@ export function createBot({ store, env }) {
       .setColor(0x5865f2)
       .setTitle(`📖 Jak zainstalować moda ${mod.label} (${serverName})`)
       .setDescription([
-        `Ten plik jest na **Minecrafta ${ver}** z **Fabric** (licencja działa na każdej wersji). Zrób to raz, krok po kroku:`,
+        `Ten plik jest na **Minecrafta ${ver}** z **Fabric** (${mod.mcBound ? 'licencja działa tylko na tej wersji' : 'licencja działa na każdej wersji'}). Zrób to raz, krok po kroku:`,
         '',
         '**Krok 1 – Zainstaluj Fabric**',
         '• Wejdź na https://fabricmc.net/use/installer/ i pobierz instalator (dla Windows: plik `.exe`).',
@@ -386,7 +388,7 @@ export function createBot({ store, env }) {
       .setMinValue(1).setMaxValue(3650 * 86400))
     .addStringOption(o => o.setName('mod').setDescription('Którego moda dotyczy licencja (domyślnie AutoRynek)')
       .addChoices(...Object.entries(MODS).map(([value, m]) => ({ name: m.label, value }))))
-    .addStringOption(o => o.setName('wersja').setDescription('Wersja Minecrafta pliku moda - wpisz np. 1.21.1 (domyślnie 1.21.11); licencja działa na każdej')
+    .addStringOption(o => o.setName('wersja').setDescription('Wersja MC moda, np. 1.21.1 (domyślnie 1.21.11); licencja PlayerHighlight działa tylko na niej')
       .setAutocomplete(true));
 
   const clearCmd = new SlashCommandBuilder()
@@ -461,6 +463,7 @@ export function createBot({ store, env }) {
     const now = Date.now();
     const lic = {
       key, discordId: user.id, mod: modId,
+      mcVersion: MODS[modId].mcBound ? ver : null,   // licencja dziala tylko na tej wersji Minecrafta (mody z mcBound)
       createdAt: now,
       expiresAt: dur.perm ? null : now + dur.ms,
       hwid: null, activatedAt: null, lastSeen: null,

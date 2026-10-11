@@ -16,7 +16,7 @@ export const MODS = {
   playerhighlight: {
     label: 'PlayerHighlight', emoji: '✨', desc: 'Licencja do moda PlayerHighlight',
     jarPrefix: 'playerhighlight', adminChannelEnv: 'PLAYERHIGHLIGHT_LICENSE_CHANNEL_ID', cmd: '/playerhighlight licencja',
-    openKey: 'Prawy Shift',
+    openKey: 'Prawy Shift', mcBound: true,   // mcBound: licencja jest przypisana do jednej wersji Minecrafta (mod wysyla swoja wersje MC)
   },
 };
 
