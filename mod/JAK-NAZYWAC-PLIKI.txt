@@ -9,6 +9,7 @@ Przyklady:
   autorynek-1.11.0-mc1.21.4.jar            -> Minecraft 1.21.4
   playerhighlight-1.0.0-mc1.21.2_1.21.3.jar -> jeden plik dla DWOCH wersji (rozdzielone _ lub +)
   playerhighlight-1.0.0-mc1.21.11.jar      -> Minecraft 1.21.11
+  playerhighlight-1.21.1.jar               -> Minecraft 1.21.1  (krotka nazwa: po prefiksie TYLKO wersja MC)
 
 Zasady:
   - Plik BEZ "-mc..." w nazwie (np. stary autorynek-1.11.0.jar) jest traktowany jako wersja 1.21.11.

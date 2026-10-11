@@ -21,7 +21,9 @@ export function parseJarName(name) {
   const modId = Object.keys(MODS).find(id => low.startsWith(MODS[id].jarPrefix.toLowerCase()));
   if (!modId) return null;
   const m = low.match(TAG_RE);
-  const versions = (m ? m[1].split(/[_+]/) : [LEGACY_MC]).filter(v => MC_VERSIONS.includes(v));
+  // nazwa bez "-mc": jesli po prefiksie jest TYLKO wersja MC (np. playerhighlight-1.21.1.jar) - to jest wersja Minecrafta
+  const bare = low.slice(MODS[modId].jarPrefix.length).match(/^-(1\.21(?:\.\d+)?)\.jar$/);
+  const versions = (m ? m[1].split(/[_+]/) : bare ? [bare[1]] : [LEGACY_MC]).filter(v => MC_VERSIONS.includes(v));
   return versions.length ? { modId, versions } : null;
 }
 
