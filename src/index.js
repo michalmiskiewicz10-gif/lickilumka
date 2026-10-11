@@ -29,7 +29,41 @@ if (!findAsset('welcome', 'kot') && env.WELCOME_IMAGE_URL) {
   console.warn('[grafika] UWAGA: brak assets/kot.png na serwerze - powitanie uzyje WELCOME_IMAGE_URL; linki z Discorda (cdn.discordapp.com) wygasaja i obrazek sie nie laduje. Upewnij sie, ze folder assets/ jest wdrozony.');
 }
 
+// Bot moze pozostac tylko na jednym, wskazanym serwerze.
+// Discord nie pozwala zmienic komunikatu w oknie autoryzacji zaproszenia.
+const allowedGuildId = (env.GUILD_ID || '').trim();
+if (!/^\d{17,20}$/.test(allowedGuildId)) {
+  console.error('Ustaw prawidlowe GUILD_ID swojego serwera w .env (17-20 cyfr).');
+  process.exit(1);
+}
+
+async function rejectForeignGuild(guild) {
+  if (guild.id === allowedGuildId) return;
+  console.warn(`Niedozwolony serwer: ${guild.name} (${guild.id}). Opuszczam.`);
+  const message = 'nie dodasz tego bota do siebie ziomeczku';
+  try {
+    const channel = guild.systemChannel;
+    if (channel?.isTextBased() && channel.permissionsFor(guild.members.me)?.has('SendMessages')) {
+      await channel.send(message);
+    } else {
+      const owner = await guild.fetchOwner();
+      await owner.send(message);
+    }
+  } catch (error) {
+    console.warn(`Nie udalo sie wyslac komunikatu na ${guild.id}: ${error.message}`);
+  } finally {
+    try { await guild.leave(); }
+    catch (error) { console.error(`Nie udalo sie opuscic ${guild.id}: ${error.message}`); }
+  }
+}
+
 const bot = createBot({ store, env });
+bot.client.on('guildCreate', rejectForeignGuild);
+bot.client.once('ready', () => {
+  for (const guild of bot.client.guilds.cache.values()) {
+    if (guild.id !== allowedGuildId) void rejectForeignGuild(guild);
+  }
+});
 const api = createApi({
   store, privateKey,
   onActivated: lic => bot.refreshMessage(lic),
