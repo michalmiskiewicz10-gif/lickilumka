@@ -7,6 +7,8 @@ export const MC_VERSIONS = ['1.21.11', '1.21.10', '1.21.9', '1.21.8', '1.21.7', 
 /** Plik bez znacznika "-mc..." w nazwie (np. stary autorynek-1.11.0.jar) uznajemy za zbudowany pod te wersje. */
 export const LEGACY_MC = '1.21.11';
 
+const byPriority = (a, b) => (Number(b.explicit) - Number(a.explicit)) || (b.mtime - a.mtime);
+
 const TAG_RE = /-mc((?:1\.21(?:\.\d+)?)(?:[_+]1\.21(?:\.\d+)?)*)(?=[-.]|$)/i;
 
 /**
@@ -24,7 +26,7 @@ export function parseJarName(name) {
   // nazwa bez "-mc": jesli po prefiksie jest TYLKO wersja MC (np. playerhighlight-1.21.1.jar) - to jest wersja Minecrafta
   const bare = low.slice(MODS[modId].jarPrefix.length).match(/^-(1\.21(?:\.\d+)?)\.jar$/);
   const versions = (m ? m[1].split(/[_+]/) : bare ? [bare[1]] : [LEGACY_MC]).filter(v => MC_VERSIONS.includes(v));
-  return versions.length ? { modId, versions } : null;
+  return versions.length ? { modId, versions, explicit: !!(m || bare) } : null;
 }
 
 /** Wszystkie rozpoznane pliki moda: [{ name, path, modId, versions, mtime }] */
@@ -42,12 +44,12 @@ export function listJars(modDir) {
 
 /** Najnowszy (wg daty pliku) jar danego moda dla danej wersji MC albo null. */
 export function pickJar(modDir, modId, ver) {
-  return listJars(modDir).filter(j => j.modId === modId && j.versions.includes(ver)).sort((a, b) => b.mtime - a.mtime)[0] || null;
+  return listJars(modDir).filter(j => j.modId === modId && j.versions.includes(ver)).sort(byPriority)[0] || null;
 }
 
 /** Wersje MC, dla ktorych istnieje plik danego moda (od najnowszej): [{ ver, jar }] */
 export function versionsFor(modDir, modId) {
   const jars = listJars(modDir).filter(j => j.modId === modId);
-  return MC_VERSIONS.map(ver => ({ ver, jar: jars.filter(j => j.versions.includes(ver)).sort((a, b) => b.mtime - a.mtime)[0] }))
+  return MC_VERSIONS.map(ver => ({ ver, jar: jars.filter(j => j.versions.includes(ver)).sort(byPriority)[0] }))
     .filter(x => x.jar);
 }
