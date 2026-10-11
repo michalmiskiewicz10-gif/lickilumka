@@ -1,5 +1,6 @@
 import http from 'node:http';
 import crypto from 'node:crypto';
+import { MODS } from './mods.js';
 
 const KEY_RE = /^[A-Z0-9]{4}(-[A-Z0-9]{4}){3}$/;
 const HWID_RE = /^[0-9a-f]{64}$/;
@@ -9,7 +10,7 @@ const NONCE_RE = /^[0-9a-f]{16,64}$/;
 export function evaluate(store, { key, hwid, mod }, now = Date.now()) {
   const lic = store.get(key);
   if (!lic) return { ok: false, reason: 'not_found' };
-  if (!['autorynek', 'botyluma'].includes(mod) || (lic.mod || 'autorynek') !== mod) return { ok: false, reason: 'wrong_mod' };
+  if (!Object.keys(MODS).includes(mod) || (lic.mod || 'autorynek') !== mod) return { ok: false, reason: 'wrong_mod' };
   if (lic.revoked) return { ok: false, reason: 'revoked' };
   if (lic.expiresAt != null && now >= lic.expiresAt) return { ok: false, reason: 'expired' };
   // po resecie HWID stary komputer jest zablokowany dla tego kodu (nie da sie go ponownie przypiac)

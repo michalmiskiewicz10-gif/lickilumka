@@ -23,6 +23,18 @@ const OFFERS = {
     addons: [{ name: 'Reset HWID', price: '5,00 zł', info: true }],
     payments: [['BLIK'], ['PayPal'], ['Paysafecard', 'prowizja +10,00 zł']],
   },
+  playerhighlight: {
+    label: 'PlayerHighlight', emoji: '✨', desc: 'Cennik i zakup moda PlayerHighlight',
+    title: 'Oferta PlayerHighlight',
+    subtitle: 'Modyfikacja do Minecraft na wersję 1.21.11',
+    prices: [
+      ['Na zawsze (Lifetime)', '10,00 zł'],
+    ],
+    addons: [
+      { name: 'Reset HWID', price: '3,00 zł', info: true },
+    ],
+    payments: [['BLIK'], ['PayPal'], ['Paysafecard', 'prowizja +10,00 zł']],
+  },
   autorynek: {
     label: 'AutoRynek', emoji: '🔑', desc: 'Cennik i zakup moda AutoRynek',
     title: 'Oferta AutoRynek',

@@ -135,7 +135,7 @@ export function createBot({ store, env }) {
   /** Najnowszy plik .jar z folderu mod/ - dolaczany do instrukcji, zeby gracz mogl go od razu pobrac. */
   function modFile(modId = DEFAULT_MOD) {
     try {
-      const prefix = modId === 'botyluma' ? 'lumabots' : 'autorynek';
+      const prefix = (MODS[modId] || MODS[DEFAULT_MOD]).jarPrefix;
       const jars = fs.readdirSync(modDir).filter(f => f.toLowerCase().endsWith('.jar') && f.toLowerCase().startsWith(prefix))
         .map(f => ({ f, t: fs.statSync(path.join(modDir, f)).mtimeMs })).sort((a, b) => b.t - a.t);
       return jars.length ? { attachment: path.join(modDir, jars[0].f), name: jars[0].f } : null;
@@ -151,13 +151,14 @@ export function createBot({ store, env }) {
       return { embeds: [embed], ...(file ? { files: [file] } : {}) };
     }
     const file = modFile(modId);
+    const mod = MODS[modId] || MODS[DEFAULT_MOD];
     const download = file
       ? `• Plik **\`${file.name}\`** jest **dołączony do tej wiadomości** – kliknij jego nazwę, żeby go pobrać.`
-      : (env.MOD_DOWNLOAD_URL ? `• Plik \`autorynek-….jar\` pobierzesz stąd: [kliknij tutaj](${env.MOD_DOWNLOAD_URL}).` : '• Plik moda dostaniesz od administracji.');
+      : (env.MOD_DOWNLOAD_URL ? `• Plik \`${mod.jarPrefix}-….jar\` pobierzesz stąd: [kliknij tutaj](${env.MOD_DOWNLOAD_URL}).` : '• Plik moda dostaniesz od administracji.');
 
     const install = new EmbedBuilder()
       .setColor(0x5865f2)
-      .setTitle(`📖 Jak zainstalować moda AutoRynek (${serverName})`)
+      .setTitle(`📖 Jak zainstalować moda ${mod.label} (${serverName})`)
       .setDescription([
         'Mod działa **tylko na wersji Minecrafta 1.21.11** z **Fabric**. Zrób to raz, krok po kroku:',
         '',
@@ -169,16 +170,18 @@ export function createBot({ store, env }) {
         '**Krok 2 – Pobierz Fabric API**',
         '• Wejdź na https://modrinth.com/mod/fabric-api/versions, wybierz wersję **1.21.11** (Fabric) i kliknij **Download**.',
         '',
-        '**Krok 3 – Pobierz moda AutoRynek (wersja 1.21.11)**',
+        `**Krok 3 – Pobierz moda ${mod.label} (wersja 1.21.11)**`,
         download,
         '',
         '**Krok 4 – Wrzuć pliki do folderu mods**',
         '• Wciśnij `Windows + R`, wpisz `%appdata%\\.minecraft\\mods` i naciśnij Enter.',
-        '• Skopiuj tam **dwa** pliki: `fabric-api-….jar` i `autorynek-….jar`.',
+        `• Skopiuj tam **dwa** pliki: \`fabric-api-….jar\` i \`${mod.jarPrefix}-….jar\`.`,
         '',
         '**Krok 5 – Uruchom grę**',
         '• W Minecraft Launcherze wybierz profil **fabric-loader-1.21.11** i kliknij **Graj**.',
-        '• Gdy gra się włączy, mod wyświetli okno **„AutoRynek – licencja”** – przejdź do aktywacji.',
+        mod.openKey
+          ? `• W grze naciśnij **${mod.openKey}** – mod wyświetli okno **„${mod.label} – licencja”** – przejdź do aktywacji.`
+          : `• Gdy gra się włączy, mod wyświetli okno **„${mod.label} – licencja”** – przejdź do aktywacji.`,
       ].join('\n'));
 
     // Krok 1 - kod: pokazujemy go tylko wlascicielowi (wiadomosc ukryta)
@@ -205,10 +208,10 @@ export function createBot({ store, env }) {
         '• Kod wygląda tak: `XXXX-XXXX-XXXX-XXXX`. Zaznacz go i wciśnij `Ctrl + C`.',
         '',
         '**Krok 3 – Wklej kod w grze**',
-        '• W oknie **„AutoRynek – licencja”** kliknij pole **Kod** i wciśnij `Ctrl + V`.',
+        `• W oknie **„${mod.label} – licencja”** kliknij pole **Kod** i wciśnij \`Ctrl + V\`.`,
         '• Kliknij **Aktywuj**.',
         '• Gdy zobaczysz **„Licencja aktywna”** – gotowe! Przy następnych uruchomieniach nie musisz wpisywać kodu ponownie.',
-        '• Okno możesz też otworzyć komendą w czacie: `/autorynek licencja XXXX-XXXX-XXXX-XXXX`.',
+        `• Okno możesz też otworzyć komendą w czacie: \`${mod.cmd} XXXX-XXXX-XXXX-XXXX\`.`,
         '',
         '**⚠️ Ważne**',
         '• Kod działa **tylko na jednym komputerze** – pierwsze użycie przypisuje go do Twojego komputera.',
@@ -269,7 +272,7 @@ export function createBot({ store, env }) {
           { name: 'Status', value: st.text },
           { name: 'Wygasa', value: expiryText(lic) },
           { name: '⚠️ Uwaga', value: '**Nikomu nie udostępniaj tego kodu!** Działa tylko na jednym komputerze – jeśli ktoś użyje go pierwszy, stracisz licencję.' },
-          { name: 'Jak użyć', value: 'W grze wklej kod w oknie licencji i kliknij **Aktywuj** (albo wpisz `/autorynek licencja KOD`).' },
+          { name: 'Jak użyć', value: `W grze wklej kod w oknie licencji i kliknij **Aktywuj** (albo wpisz \`${(MODS[lic.mod || DEFAULT_MOD] || MODS[DEFAULT_MOD]).cmd} KOD\`).` },
         );
     });
     return { embeds: embeds.slice(0, 10) };
@@ -437,7 +440,7 @@ export function createBot({ store, env }) {
 
     // opcjonalnie: kopia dla administracji z przyciskami Przedluz / Uniewaznij (gdy ustawiono LICENSE_CHANNEL_ID)
     let adminNote = '';
-    const adminTargetId = modId === 'botyluma' ? env.LUMABOTS_LICENSE_CHANNEL_ID : env.LICENSE_CHANNEL_ID;
+    const adminTargetId = env[MODS[modId].adminChannelEnv];
     if (adminTargetId && adminTargetId !== channel.id) {
       try {
         const ach = await client.channels.fetch(adminTargetId);
@@ -462,7 +465,7 @@ export function createBot({ store, env }) {
       }
     } else {
       deliveryNote = `\n⚠️ Brak pliku .jar dla **${MODS[modId].label}** w folderze \`mod/\`. `
-        + (modId === 'botyluma' ? 'Dodaj plik o nazwie zaczynającej się od \`lumabots\`.' : 'Dodaj plik o nazwie zaczynającej się od \`autorynek\`.');
+        + `Dodaj plik o nazwie zaczynającej się od \`${MODS[modId].jarPrefix}\`.`;
     }
     return i.reply({
       content: `✅ Licencja utworzona dla <@${user.id}> (wiadomość jest powyżej).\n**Kod:** \`${key}\` (widzisz go tylko Ty)${deliveryNote}${adminNote}`,
@@ -601,7 +604,9 @@ export function createBot({ store, env }) {
         return i.reply({ content: 'Wybierz moda, którego licencję chcesz sprawdzić:', components: [modSelectRow()], flags: EPHEMERAL });
       }
       const mine = store.byDiscord(i.user.id).filter(l => !l.revoked);
-      return i.reply({ ...helpMessage(mine, modId), flags: EPHEMERAL });
+      const own = Object.keys(MODS).filter(id => mine.some(l => (l.mod || DEFAULT_MOD) === id));
+      const pick = own.length === 1 ? own[0] : DEFAULT_MOD;   // gdy gracz ma licencje na jednego moda - instrukcja dla niego
+      return i.reply({ ...helpMessage(mine.filter(l => (l.mod || DEFAULT_MOD) === pick), pick), flags: EPHEMERAL });
     }
     if (action === 'verify') return verify.handleButton(i);
     if (action === 'ticket') return tickets.handleButton(i);
