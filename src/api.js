@@ -1,15 +1,13 @@
 import http from 'node:http';
 import crypto from 'node:crypto';
-import { MODS, DEFAULT_MOD } from './mods.js';
+import { MODS } from './mods.js';
 
 const KEY_RE = /^[A-Z0-9]{4}(-[A-Z0-9]{4}){3}$/;
 const HWID_RE = /^[0-9a-f]{64}$/;
 const NONCE_RE = /^[0-9a-f]{16,64}$/;
 
 /** Sprawdza licencje. Przy pierwszym poprawnym uzyciu PRZYPISUJE ja do komputera (hwid). */
-export function evaluate(store, { key, hwid, mod: modRaw, mc }, now = Date.now()) {
-  // starsze wersje moda AutoRynek (np. autorynek-1.11.0.jar) nie wysylaja pola "mod" - traktujemy je jako AutoRynek
-  const mod = modRaw || DEFAULT_MOD;
+export function evaluate(store, { key, hwid, mod, mc }, now = Date.now()) {
   const lic = store.get(key);
   if (!lic) return { ok: false, reason: 'not_found' };
   if (!Object.keys(MODS).includes(mod) || (lic.mod || 'autorynek') !== mod) return { ok: false, reason: 'wrong_mod' };

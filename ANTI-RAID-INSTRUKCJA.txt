@@ -1,0 +1,10 @@
+AntiRaid jest domyslnie wlaczony.
+Usuwa publiczne wiadomosci aplikacji i webhookow (takze legalnych).
+Po 7 wiadomosciach jednego uzytkownika w 10 sekund usuwa ostatnia i probuje nalozyc timeout 10 minut.
+W .env ustaw ANTI_RAID_LOG_CHANNEL_ID na ID kanalu logow (opcjonalne).
+Wymagane uprawnienia bota: Manage Messages i Moderate Members.
+W Discord Developer Portal wlacz Message Content Intent.
+ANTI_RAID_BLOCK_EXTERNAL=0 wylacza usuwanie wiadomosci aplikacji.
+ANTI_RAID=0 wylacza caly modul.
+W ustawieniach roli @everyone dodatkowo wylacz Use External Apps.
+Bot nie moze zablokowac samego wykonania /raid w obcej aplikacji ani prywatnych odpowiedzi.

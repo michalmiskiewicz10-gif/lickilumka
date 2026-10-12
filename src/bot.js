@@ -17,6 +17,7 @@ import { createShop } from './shop.js';
 import { createDownload } from './download.js';
 import { pickJar, versionsFor, LEGACY_MC, MC_VERSIONS } from './jars.js';
 import { createAntiInvite } from './antiinvite.js';
+import { createAntiRaid } from './antiraid.js';
 import { createBoost } from './boost.js';
 import { createImageGuard } from './imageguard.js';
 import { createRegulamin } from './regulamin.js';
@@ -71,6 +72,7 @@ export function createBot({ store, env }) {
   const shop = createShop({ client, env, isAdmin, serverName, tickets });
   const download = createDownload({ client, store, isAdmin, serverName, modDir: path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'mod') });
   const antiInvite = createAntiInvite({ client, env, serverName });
+  const antiRaid = createAntiRaid({ client, env });
   const boost = createBoost({ client, env, serverName });
   const photoChannel = createPhotoChannel({ env, serverName });
   const imageGuard = createImageGuard({ env });
@@ -361,6 +363,7 @@ export function createBot({ store, env }) {
   }
 
   client.on(Events.MessageCreate, async message => {
+    if (await antiRaid.onMessage(message).catch(e => (console.error('AntiRaid:', e), false))) return;
     if (await boost.onMessage(message).catch(e => (console.error('Boost:', e), false))) return;
     if (await antiInvite.onMessage(message).catch(e => (console.error('Antyreklama:', e), false))) return;
     if (await photoChannel.onMessage(message).catch(e => (console.error('Kanal zdjec:', e), false))) return;
