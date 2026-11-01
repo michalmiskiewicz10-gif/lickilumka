@@ -18,6 +18,11 @@ export const MODS = {
     jarPrefix: 'playerhighlight', adminChannelEnv: 'PLAYERHIGHLIGHT_LICENSE_CHANNEL_ID', cmd: '/playerhighlight licencja',
     openKey: 'Prawy Shift', mcBound: true,   // mcBound: licencja jest przypisana do jednej wersji Minecrafta (mod wysyla swoja wersje MC)
   },
+  leafbot: {
+    label: 'LeafBot', emoji: '🍃', desc: 'Licencja do moda LeafBot',
+    jarPrefix: 'leafbot', adminChannelEnv: 'LEAFBOT_LICENSE_CHANNEL_ID', cmd: '/leafbot licencja',
+    openKey: 'J',
+  },
 };
 
 // licencje wystawione przed v5 nie maja pola "mod" - traktujemy je jako AutoRynek

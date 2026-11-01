@@ -35,6 +35,22 @@ const OFFERS = {
     ],
     payments: [['BLIK'], ['PayPal'], ['Paysafecard', 'prowizja +10,00 zł']],
   },
+  leafbot: {
+    label: 'LeafBot', emoji: '🍃', desc: 'Cennik i zakup moda LeafBot',
+    title: 'Oferta LeafBot',
+    subtitle: 'Modyfikacja do Minecraft na wersję 1.21.11',
+    // UWAGA: ceny wpisane przykladowo (jak AutoRynek) - zmien na swoje
+    prices: [
+      ['1 tydzień', '10,00 zł'],
+      ['1 miesiąc', '30,00 zł'],
+      ['3 miesiące', '60,00 zł'],
+      ['Lifetime', '100,00 zł'],
+    ],
+    addons: [
+      { name: 'Reset HWID', price: '5,00 zł', info: true },
+    ],
+    payments: [['BLIK'], ['PayPal'], ['Paysafecard', 'prowizja +10,00 zł']],
+  },
   autorynek: {
     label: 'AutoRynek', emoji: '🔑', desc: 'Cennik i zakup moda AutoRynek',
     title: 'Oferta AutoRynek',
