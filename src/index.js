@@ -69,7 +69,7 @@ const api = createApi({
   onActivated: lic => bot.refreshMessage(lic),
 });
 
-const port = parseInt(env.PORT || '8787', 10);
+const port = parseInt(env.SERVER_PORT || env.PORT || '8787', 10);   // SERVER_PORT = port z hostingu (Pterodactyl/NeyHost)
 api.listen(port, () => console.log(`API licencji nasluchuje na porcie ${port}`));
 bot.client.on('error', e => console.error('Blad klienta Discord:', e.message));
 bot.client.login(env.DISCORD_TOKEN).catch(e => {

@@ -591,6 +591,53 @@ export function createBot({ store, env }) {
     });
   }
 
+  // ================= kopia zapasowa / przenoszenie bazy =================
+  const backupCmd = new SlashCommandBuilder()
+    .setName('kopia_bazy').setDescription('Wysyła Ci (tylko Ty widzisz) plik z całą bazą licencji – kopia zapasowa / przenosiny bota');
+  const importCmd = new SlashCommandBuilder()
+    .setName('wczytaj_baze').setDescription('Wczytuje bazę licencji z pliku .json (z /kopia_bazy) – ZASTĘPUJE obecną bazę')
+    .addAttachmentOption(o => o.setName('plik').setDescription('Plik licenses.json z /kopia_bazy').setRequired(true));
+
+  // baza zawiera wszystkie kody - tylko wlasciciel serwera albo ID z LICENSE_USER_IDS (sama ranga nie wystarczy)
+  const isDbAdmin = i => (i.guild?.ownerId && i.guild.ownerId === i.user.id) || licenseUserIds.includes(i.user.id);
+  const NO_DB_PERM = '❌ Bazą licencji może zarządzać tylko właściciel serwera (albo ID z LICENSE_USER_IDS).';
+
+  async function handleBackupCmd(i) {
+    if (!isDbAdmin(i)) return i.reply({ content: NO_DB_PERM, flags: EPHEMERAL });
+    const buf = Buffer.from(JSON.stringify(store.data, null, 2));
+    const n = Object.keys(store.data.licenses || {}).length;
+    return i.reply({
+      content: `💾 Kopia bazy: **${n}** licencji. Zachowaj ten plik – NIE udostępniaj go nikomu (są w nim wszystkie kody).`,
+      files: [{ attachment: buf, name: `licenses-${new Date().toISOString().slice(0, 10)}.json` }],
+      flags: EPHEMERAL,
+    });
+  }
+
+  async function handleImportCmd(i) {
+    if (!isDbAdmin(i)) return i.reply({ content: NO_DB_PERM, flags: EPHEMERAL });
+    const att = i.options.getAttachment('plik', true);
+    if (att.size > 20 * 1024 * 1024) return i.reply({ content: '❌ Plik jest za duży.', flags: EPHEMERAL });
+    await i.deferReply({ flags: EPHEMERAL });
+    let data;
+    try {
+      const res = await fetch(att.url);
+      data = JSON.parse(await res.text());
+    } catch (e) {
+      return i.editReply(`❌ Nie udało się odczytać pliku: ${e.message}`);
+    }
+    if (!data || typeof data !== 'object' || typeof data.licenses !== 'object') return i.editReply('❌ To nie jest plik bazy (brak pola "licenses").');
+    const before = Object.keys(store.data.licenses || {}).length;
+    // kopia obecnej bazy na wszelki wypadek
+    try { fs.copyFileSync(store.file, store.file + '.przed-wczytaniem-' + Date.now()); } catch { /* brak pliku */ }
+    for (const k of ['suggestions', 'users', 'meta', 'giveaways']) if (!data[k]) data[k] = {};
+    if (!data.media) data.media = {};
+    if (!data.media.apps) data.media.apps = {};
+    if (!data.media.cd) data.media.cd = {};
+    store.data = data;
+    store.save();
+    return i.editReply(`✅ Wczytano bazę: **${Object.keys(data.licenses).length}** licencji (wcześniej było ${before}). Poprzednia baza została zapisana obok jako kopia.`);
+  }
+
   // ================= przedluzanie wszystkich aktywnych licencji =================
   const extAllCmd = new SlashCommandBuilder()
     .setName('przedluz_wszystkie').setDescription('Przedłuża KAŻDĄ aktywną licencję o podaną liczbę dni')
@@ -753,6 +800,8 @@ export function createBot({ store, env }) {
         else if (i.commandName === 'regulamin') await regulamin.handleCommand(i);
         else if (i.commandName === 'resethwid') await handleResetCmd(i);
         else if (i.commandName === 'usun_licencje') await handleRemoveCmd(i);
+        else if (i.commandName === 'kopia_bazy') await handleBackupCmd(i);
+        else if (i.commandName === 'wczytaj_baze') await handleImportCmd(i);
         else if (i.commandName === 'przedluz_wszystkie') await handleExtAllCmd(i);
         else if (i.commandName === 'licencja') await handleCreate(i);
         else if (i.commandName === 'clear') await handleClear(i);
@@ -829,7 +878,7 @@ export function createBot({ store, env }) {
     console.log(`Bot zalogowany jako ${c.user.tag}`);
     giveaway.start();
     if (boost.roleId && env.GUILD_ID) c.guilds.fetch(env.GUILD_ID).then(g => boost.syncAll(g)).catch(() => {});
-    const cmds = [licencjaCmd, clearCmd, panelCmd, instalacjaCmd, resetCmd, removeCmd, extAllCmd, ...shop.commands, ...download.commands, ...regulamin.commands, ...verify.commands, ...tickets.commands, ...legit.commands, ...media.commands, ...giveaway.commands].map(x => x.toJSON());
+    const cmds = [licencjaCmd, clearCmd, panelCmd, instalacjaCmd, resetCmd, removeCmd, backupCmd, importCmd, extAllCmd, ...shop.commands, ...download.commands, ...regulamin.commands, ...verify.commands, ...tickets.commands, ...legit.commands, ...media.commands, ...giveaway.commands].map(x => x.toJSON());
     try {
       if (env.GUILD_ID) {
         const guild = await c.guilds.fetch(env.GUILD_ID);

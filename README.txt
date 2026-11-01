@@ -216,6 +216,20 @@ Przycisk [Przedluz licencje] (i okienko z czasem) wymaga teraz tej samej rangi c
 - W GRZE: klawisz J -> okno "LeafBot - licencja" (wklej kod, Aktywuj) albo komenda /leafbot licencja XXXX-XXXX-XXXX-XXXX.
   Po aktywacji J otwiera normalne GUI LeafBota. Bez waznej licencji bota nie da sie uruchomic, a gdy licencja wygasnie/zostanie
   uniewazniona w trakcie gry - bot sam sie zatrzymuje. Kod zapisuje sie w config/leafbot/license.key.
-- Plik moda: mod/leafbot-2.0.0-mc1.21.11.jar (juz wrzucony; stary leafbot-1.0.0 trzeba usunac z folderu mods - inaczej gra sie nie wlaczy).
+- Plik moda: mod/leafbot-2.0.1-mc1.21.11.jar (juz wrzucony; stary leafbot-1.0.0 trzeba usunac z folderu mods - inaczej gra sie nie wlaczy).
 - Kanal administracji dla licencji LeafBot: LEAFBOT_LICENSE_CHANNEL_ID w .env (opcjonalny).
 - Po aktualizacji zrestartuj bota (odswiezy liste modow w komendach).
+
+
+=== PRZENOSINY BOTA / KOPIA BAZY ===
+/kopia_bazy                 - bot wysyla Ci (tylko Ty widzisz) plik z cala baza licencji (.json). Rob to regularnie jako kopie zapasowa.
+/wczytaj_baze plik:<.json>  - wczytuje baze z pliku z /kopia_bazy (ZASTEPUJE obecna; stara zostaje zapisana obok jako kopia).
+Obie komendy: tylko wlasciciel serwera albo ID z LICENSE_USER_IDS.
+
+NeyHost / Pterodactyl: w glownym folderze jest plik "*.js" (startuje bota) - zmienna MAIN_FILE moze zostac "*.js".
+Port bierze sie sam z hostingu (SERVER_PORT). DATA_DIR zostaw pusty - baza bedzie w folderze data/.
+
+=== NEYHOST (adres serwera licencji) ===
+Mody w folderze mod/ lacza sie z: http://pl-waw-1.neyhost.cloud:10056/api/validate
+(autorynek-1.11.1, lumabots-2.0.1, playerhighlight-1.0.1, leafbot-2.0.1). Stare wersje modow lacza sie z Railway -
+po wylaczeniu Railway przestana dzialac, gracze musza pobrac nowe przez /pobierz.
